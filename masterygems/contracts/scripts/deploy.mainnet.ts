@@ -5,7 +5,11 @@ async function main() {
   const dev = process.env.DEV_ADDRESS;
 
   if (!usdc || !dev) {
+
     throw new Error("USDC_ADDRESS and DEV_ADDRESS must be set in env variables");
+
+    throw new Error("USDC_ADDRESS and DEV_ADDRESS must be set in env");
+
   }
 
   console.log("Deploying MasteryGemsRooms to Monad mainnet...");
