@@ -42,6 +42,7 @@ describe("MasteryGemsRooms", function () {
     const contract = await MasteryGemsRooms.deploy(usdc.address, dev.address);
     await contract.waitForDeployment();
 
+
 const ONE = parseUnits("1", 6); // 1 USDC (6 decimals)
 
 describe("MasteryGemsRooms", function () {
@@ -64,6 +65,7 @@ describe("MasteryGemsRooms", function () {
     await contract.waitForDeployment();
 
     // Đánh dấu backend là backend hợp lệ
+
 
     await contract.setBackend(backend.address, true);
 
@@ -90,6 +92,7 @@ describe("MasteryGemsRooms", function () {
 
     await expect(tx)
 
+
       .to.emit(contract, "RoomCreated")
       .withArgs(0n, backend.address, ONE, 2, 4);
 
@@ -111,6 +114,7 @@ describe("MasteryGemsRooms", function () {
     await usdc.connect(player1).transfer(contract.address, 0); // ensure signer type
 
 
+
     expect(room.state).to.equal(0); // Open
   });
 
@@ -128,6 +132,7 @@ describe("MasteryGemsRooms", function () {
 
     // Player 1 join
 
+
     const joinTx1 = await contract.connect(player1).joinRoom(0);
     await expect(joinTx1)
       .to.emit(contract, "RoomJoined")
@@ -137,6 +142,7 @@ describe("MasteryGemsRooms", function () {
 
     // Player 2 join
 
+
     const joinTx2 = await contract.connect(player2).joinRoom(0);
     await expect(joinTx2)
       .to.emit(contract, "RoomJoined")
@@ -145,6 +151,7 @@ describe("MasteryGemsRooms", function () {
 
 
     // Backend lock room
+
 
     const lockTx = await contract.connect(backend).lockRoom(0);
     await expect(lockTx)
@@ -227,6 +234,7 @@ describe("MasteryGemsRooms", function () {
       .settleGame(0, winners as any, payouts as any);
 
 
+
     await expect(settleTx)
       .to.emit(contract, "GameSettled")
       .withArgs(0n, winners, payouts, devFee);
@@ -240,6 +248,7 @@ describe("MasteryGemsRooms", function () {
     const room = await contract.rooms(0);
     expect(room.state).to.equal(2);
   });
+
 
     // Trước khi join:
     //   - mỗi player mint 1 * ONE
@@ -257,6 +266,7 @@ describe("MasteryGemsRooms", function () {
     const room = await contract.rooms(0);
     expect(room.state).to.equal(2); // Settled
   });
+
 
 
 });

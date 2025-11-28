@@ -12,6 +12,7 @@ const config: HardhatUserConfig = {
       url: process.env.MONAD_RPC_URL || "",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
 
+
 import * as dotenv from "dotenv";
 
 dotenv.config();
