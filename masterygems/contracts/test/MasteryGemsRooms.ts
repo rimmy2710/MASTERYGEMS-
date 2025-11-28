@@ -9,34 +9,8 @@ describe("MasteryGemsRooms", function () {
     const [owner, backend, player1, player2, player3, dev] =
       await ethers.getSigners();
 
-    const MockUSDC = await ethers.getContractFactory(`
-      contract MockUSDC {
-        string public name = "Mock USDC";
-        string public symbol = "mUSDC";
-        uint8 public decimals = 6;
-        mapping(address => uint256) public balanceOf;
-        event Transfer(address indexed from, address indexed to, uint256 value);
-        function transfer(address to, uint256 amount) external returns (bool) {
-          require(balanceOf[msg.sender] >= amount, "bal");
-          balanceOf[msg.sender] -= amount;
-          balanceOf[to] += amount;
-          emit Transfer(msg.sender, to, amount);
-          return true;
-        }
-        function transferFrom(address from, address to, uint256 amount) external returns (bool) {
-          require(balanceOf[from] >= amount, "bal");
-          balanceOf[from] -= amount;
-          balanceOf[to] += amount;
-          emit Transfer(from, to, amount);
-          return true;
-        }
-        function mint(address to, uint256 amount) external {
-          balanceOf[to] += amount;
-          emit Transfer(address(0), to, amount);
-        }
-      }
-    `);
-
+    // Dùng MockUSDC đã compile sẵn từ MockUSDC.sol
+    const MockUSDC = await ethers.getContractFactory("MockUSDC");
     const usdc = await MockUSDC.deploy();
     await usdc.waitForDeployment();
 
