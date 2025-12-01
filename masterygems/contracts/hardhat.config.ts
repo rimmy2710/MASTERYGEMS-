@@ -1,5 +1,11 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import * as dotenv from "dotenv";
+
+dotenv.config();
+
+const MONAD_RPC_URL = process.env.MONAD_RPC_URL || "";
+const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
 
 import dotenv from "dotenv";
 
@@ -25,11 +31,17 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {},
     monadMainnet: {
+
+      url: MONAD_RPC_URL || "https://rpc-mainnet.monadinfra.com",
+      accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+
       url: MONAD_RPC_URL,
       accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+
 
     },
   },
 };
 
 export default config;
+

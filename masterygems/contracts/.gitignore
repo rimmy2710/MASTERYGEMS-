@@ -1,0 +1,10 @@
+# Env files
+.env
+.env.*
+
+# Build outputs
+node_modules
+artifacts
+cache
+typechain-types
+
