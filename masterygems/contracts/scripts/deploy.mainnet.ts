@@ -4,6 +4,7 @@ async function main() {
   const usdc = process.env.USDC_ADDRESS;
   const dev = process.env.DEV_ADDRESS;
 
+
   if (!usdc) {
     throw new Error("USDC_ADDRESS is not set in env");
   }
@@ -20,6 +21,20 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   const deployerAddress = await deployer.getAddress();
   console.log("Deployer:", deployerAddress);
+
+
+  if (!usdc || !dev) {
+
+    throw new Error("USDC_ADDRESS and DEV_ADDRESS must be set in env variables");
+
+    throw new Error("USDC_ADDRESS and DEV_ADDRESS must be set in env");
+
+  }
+
+  console.log("Deploying MasteryGemsRooms to Monad mainnet...");
+  console.log("USDC:", usdc);
+  console.log("Dev wallet:", dev);
+
 
   const MasteryGemsRooms = await ethers.getContractFactory("MasteryGemsRooms");
   const contract = await MasteryGemsRooms.deploy(usdc, dev);
