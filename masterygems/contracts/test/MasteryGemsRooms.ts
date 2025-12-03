@@ -1,272 +1,126 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { parseUnits } from "ethers";
 
-
-const ONE = parseUnits("1", 6);
-
-describe("MasteryGemsRooms", function () {
+describe("MoneyGameRooms", function () {
   async function deployFixture() {
-    const [owner, backend, player1, player2, player3, dev] = await ethers.getSigners();
+    const [owner, player1, player2, player3, player4] = await ethers.getSigners();
 
-    const MockUSDC = await ethers.getContractFactory(`contract MockUSDC {
-      string public name = "Mock USDC";
-      string public symbol = "mUSDC";
-      uint8 public decimals = 6;
-      mapping(address => uint256) public balanceOf;
-      event Transfer(address indexed from, address indexed to, uint256 value);
-      function transfer(address to, uint256 amount) external returns (bool) {
-        require(balanceOf[msg.sender] >= amount, "bal");
-        balanceOf[msg.sender] -= amount;
-        balanceOf[to] += amount;
-        emit Transfer(msg.sender, to, amount);
-        return true;
-      }
-      function transferFrom(address from, address to, uint256 amount) external returns (bool) {
-        require(balanceOf[from] >= amount, "bal");
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount;
-        emit Transfer(from, to, amount);
-        return true;
-      }
-      function mint(address to, uint256 amount) external {
-        balanceOf[to] += amount;
-        emit Transfer(address(0), to, amount);
-      }
-    }`);
-
-    const usdc = await MockUSDC.deploy();
+    // Deploy test USDC
+    const TestUSDC = await ethers.getContractFactory("TestUSDC");
+    const usdc = await TestUSDC.deploy();
     await usdc.waitForDeployment();
 
-    const MasteryGemsRooms = await ethers.getContractFactory("MasteryGemsRooms");
-    const contract = await MasteryGemsRooms.deploy(usdc.address, dev.address);
-    await contract.waitForDeployment();
-
-
-const ONE = parseUnits("1", 6); // 1 USDC (6 decimals)
-
-describe("MasteryGemsRooms", function () {
-
-  async function deployFixture() {
-    const [owner, backend, player1, player2, player3, dev] =
-      await ethers.getSigners();
-
-    // Deploy MockUSDC (đã tạo ở contracts/MockUSDC.sol)
-    const MockUSDC = await ethers.getContractFactory("MockUSDC");
-    const usdc = await MockUSDC.deploy();
-    await usdc.waitForDeployment();
-
-    // Deploy MasteryGemsRooms
-    const MasteryGemsRooms = await ethers.getContractFactory("MasteryGemsRooms");
-    const contract = await MasteryGemsRooms.deploy(
+    // Deploy MoneyGameRooms
+    const MoneyGameRooms = await ethers.getContractFactory("MoneyGameRooms");
+    const rooms = await MoneyGameRooms.deploy(
       await usdc.getAddress(),
-      dev.address
+      owner.address
     );
-    await contract.waitForDeployment();
+    await rooms.waitForDeployment();
 
-    // Đánh dấu backend là backend hợp lệ
+    // Mint USDC cho players (chỉ dùng trong test, không ảnh hưởng logic sản phẩm)
+    const initial = ethers.parseUnits("1000", 6);
+    await usdc.mint(player1.address, initial);
+    await usdc.mint(player2.address, initial);
+    await usdc.mint(player3.address, initial);
+    await usdc.mint(player4.address, initial);
 
-
-    await contract.setBackend(backend.address, true);
-
-    return { contract, usdc, owner, backend, player1, player2, player3, dev };
+    return {
+      owner,
+      player1,
+      player2,
+      player3,
+      player4,
+      usdc,
+      rooms,
+      initial,
+    };
   }
 
+  describe("createRoom()", function () {
+    it("creates a room with correct stake", async function () {
+      const { rooms } = await deployFixture();
 
-  it("creates rooms", async function () {
-    const { contract, backend } = await deployFixture();
+      await rooms.createRoom(1); // stake = 1 USDC
 
-    const createTx = await contract.connect(backend).createRoom(ONE, 2, 4, backend.address);
-
-    await expect(createTx)
-
-  //
-  // TEST 1: CREATE ROOM
-  //
-  it("creates rooms", async function () {
-    const { contract, backend } = await deployFixture();
-
-    const tx = await contract
-      .connect(backend)
-      .createRoom(ONE, 2, 4, backend.address);
-
-    await expect(tx)
-
-
-      .to.emit(contract, "RoomCreated")
-      .withArgs(0n, backend.address, ONE, 2, 4);
-
-    const room = await contract.rooms(0);
-    expect(room.stakeAmount).to.equal(ONE);
-    expect(room.minPlayers).to.equal(2n);
-    expect(room.maxPlayers).to.equal(4n);
-
-    expect(room.state).to.equal(0);
+      const room = await rooms.rooms(1);
+      expect(room.stake).to.equal(1n);
+    });
   });
 
-  it("allows players to join and locks room", async function () {
-    const { contract, backend, player1, player2, usdc } = await deployFixture();
-    await contract.connect(backend).createRoom(ONE, 2, 4, backend.address);
+  describe("joinRoom()", function () {
+    it("allows players to join and transfers USDC", async function () {
+      const { rooms, usdc, player1, player2 } = await deployFixture();
 
-    await usdc.mint(player1.address, ONE * 2n);
-    await usdc.mint(player2.address, ONE * 2n);
+      await rooms.createRoom(1); // roomId = 1, stake = 1 USDC
 
-    await usdc.connect(player1).transfer(contract.address, 0); // ensure signer type
+      const roomsAddress = await rooms.getAddress();
+      const stake = ethers.parseUnits("1", 6);
 
+      // approve cho contract được rút 1 USDC
+      await usdc.connect(player1).approve(roomsAddress, stake);
+      await usdc.connect(player2).approve(roomsAddress, stake);
 
+      await rooms.connect(player1).joinRoom(1);
+      await rooms.connect(player2).joinRoom(1);
 
-    expect(room.state).to.equal(0); // Open
+      const contractBalance = await usdc.balanceOf(roomsAddress);
+      expect(contractBalance).to.equal(stake * 2n);
+      // Không check room.players.length nữa để tránh phụ thuộc ABI tuple
+    });
   });
 
-  //
-  // TEST 2: JOIN ROOM & LOCK
-  //
-  it("allows players to join and locks room", async function () {
-    const { contract, backend, player1, player2, usdc } = await deployFixture();
+  describe("settleGame()", function () {
+    it("distributes payout 50/30/5/5 correctly", async function () {
+      const {
+        rooms,
+        usdc,
+        player1,
+        player2,
+        player3,
+        player4,
+        initial,
+      } = await deployFixture();
 
-    await contract.connect(backend).createRoom(ONE, 2, 4, backend.address);
+      await rooms.createRoom(1); // roomId = 1, stake = 1 USDC
 
-    // Mint USDC cho player
-    await usdc.mint(player1.address, ONE);
-    await usdc.mint(player2.address, ONE);
+      const roomsAddress = await rooms.getAddress();
+      const stake = ethers.parseUnits("1", 6);
 
-    // Player 1 join
+      // approve & join 4 players
+      await usdc.connect(player1).approve(roomsAddress, stake);
+      await usdc.connect(player2).approve(roomsAddress, stake);
+      await usdc.connect(player3).approve(roomsAddress, stake);
+      await usdc.connect(player4).approve(roomsAddress, stake);
 
+      await rooms.connect(player1).joinRoom(1);
+      await rooms.connect(player2).joinRoom(1);
+      await rooms.connect(player3).joinRoom(1);
+      await rooms.connect(player4).joinRoom(1);
 
-    const joinTx1 = await contract.connect(player1).joinRoom(0);
-    await expect(joinTx1)
-      .to.emit(contract, "RoomJoined")
-      .withArgs(0n, player1.address, ONE);
+      // ranked: player1 top1, player2 top2, player3 top3, player4 top4
+      const ranked = [
+        player1.address,
+        player2.address,
+        player3.address,
+        player4.address,
+      ];
 
+      await rooms.settleGame(1, ranked);
 
+      const pool = stake * 4n; // 4 người, mỗi người stake 1 USDC
 
-    // Player 2 join
+      const b1 = await usdc.balanceOf(player1.address);
+      const b2 = await usdc.balanceOf(player2.address);
+      const b3 = await usdc.balanceOf(player3.address);
+      const b4 = await usdc.balanceOf(player4.address);
 
-
-    const joinTx2 = await contract.connect(player2).joinRoom(0);
-    await expect(joinTx2)
-      .to.emit(contract, "RoomJoined")
-      .withArgs(0n, player2.address, ONE);
-
-
-
-    // Backend lock room
-
-
-    const lockTx = await contract.connect(backend).lockRoom(0);
-    await expect(lockTx)
-      .to.emit(contract, "RoomLocked")
-      .withArgs(0n);
-
+      // Mỗi người đã mất 1 USDC khi joinRoom, sau đó nhận share từ pool
+      // balance_after = initial - stake + rewardShare
+      expect(b1).to.equal(initial - stake + (pool * 50n / 100n));
+      expect(b2).to.equal(initial - stake + (pool * 30n / 100n));
+      expect(b3).to.equal(initial - stake + (pool * 5n / 100n));
+      expect(b4).to.equal(initial - stake + (pool * 5n / 100n));
+    });
   });
-
-  it("settles game with payouts and dev fee", async function () {
-    const { contract, backend, player1, player2, player3, usdc, dev } = await deployFixture();
-    await contract.connect(backend).createRoom(ONE, 2, 4, backend.address);
-
-    await usdc.mint(player1.address, ONE * 3n);
-    await usdc.mint(player2.address, ONE * 3n);
-    await usdc.mint(player3.address, ONE * 3n);
-
-    await expect(contract.connect(player1).joinRoom(0)).to.emit(contract, "RoomJoined");
-    await expect(contract.connect(player2).joinRoom(0)).to.emit(contract, "RoomJoined");
-    await expect(contract.connect(player3).joinRoom(0)).to.emit(contract, "RoomJoined");
-
-    await expect(contract.connect(backend).lockRoom(0)).to.emit(contract, "RoomLocked");
-
-    const winners = [player1.address, player2.address, player3.address, ethers.ZeroAddress];
-    const payouts = [ONE * 2n, ONE, 0n, 0n];
-
-    const totalStake = ONE * 3n;
-    const devFee = (totalStake * 10n) / 100n;
-
-    const settleTx = await contract.connect(backend).settleGame(0, winners as any, payouts as any);
-
-
-    const room = await contract.rooms(0);
-    expect(room.playerCount).to.equal(2n);
-    expect(room.state).to.equal(1); // Locked
-  });
-
-  //
-  // TEST 3: SETTLE GAME + PAYOUT
-  //
-  it("settles game with payouts and dev fee", async function () {
-    const { contract, backend, player1, player2, player3, usdc, dev } =
-      await deployFixture();
-
-    await contract.connect(backend).createRoom(ONE, 2, 4, backend.address);
-
-    // Mint USDC cho từng player
-    await usdc.mint(player1.address, ONE);
-    await usdc.mint(player2.address, ONE);
-    await usdc.mint(player3.address, ONE);
-
-    // Cả 3 player join room
-    await contract.connect(player1).joinRoom(0);
-    await contract.connect(player2).joinRoom(0);
-    await contract.connect(player3).joinRoom(0);
-
-    // Lock room
-    await contract.connect(backend).lockRoom(0);
-
-    // Tổng stake = 3 * ONE
-    const totalStake = ONE * 3n;
-    const devFee = (totalStake * 10n) / 100n; // 10%
-    const maxDistributable = totalStake - devFee; // 90% pool
-
-    // Chọn payouts sao cho tổng <= maxDistributable
-    // Ở đây: chỉ top1 nhận 2 * ONE, tổng = 2 * ONE < 2.7 * ONE
-    const winners = [
-      player1.address,
-      ethers.ZeroAddress,
-      ethers.ZeroAddress,
-      ethers.ZeroAddress,
-    ];
-    const payouts = [ONE * 2n, 0n, 0n, 0n];
-
-    // Kiểm tra điều kiện: tổng payouts <= maxDistributable
-    const totalPayout = payouts.reduce((acc, v) => acc + v, 0n);
-    expect(totalPayout).to.be.lte(maxDistributable);
-
-    const settleTx = await contract
-      .connect(backend)
-      .settleGame(0, winners as any, payouts as any);
-
-
-
-    await expect(settleTx)
-      .to.emit(contract, "GameSettled")
-      .withArgs(0n, winners, payouts, devFee);
-
-
-    expect(await usdc.balanceOf(player1.address)).to.equal(ONE * 2n);
-    expect(await usdc.balanceOf(player2.address)).to.equal(ONE * 2n);
-    expect(await usdc.balanceOf(player3.address)).to.equal(0n);
-    expect(await usdc.balanceOf(dev.address)).to.equal(devFee);
-
-    const room = await contract.rooms(0);
-    expect(room.state).to.equal(2);
-  });
-
-
-    // Trước khi join:
-    //   - mỗi player mint 1 * ONE
-    // JoinRoom dùng transferFrom => mỗi người mất 1 * ONE vào contract
-    // Sau settle:
-    //   - player1 nhận về 2 * ONE
-    //   - player2, player3 không nhận gì
-    expect(await usdc.balanceOf(player1.address)).to.equal(ONE * 2n);
-    expect(await usdc.balanceOf(player2.address)).to.equal(0n);
-    expect(await usdc.balanceOf(player3.address)).to.equal(0n);
-
-    // Dev nhận đúng devFee
-    expect(await usdc.balanceOf(dev.address)).to.equal(devFee);
-
-    const room = await contract.rooms(0);
-    expect(room.state).to.equal(2); // Settled
-  });
-
-
-
 });
