@@ -1,5 +1,6 @@
 // frontend/lib/config.ts
-// In development, the browser should always talk to the same origin (port 3000).
-// We expose the backend through a Next.js rewrite under this base path.
+// Frontend calls backend directly via a public URL.
+// Backend has CORS enabled, so it can accept requests from the frontend origin.
 
-export const API_BASE_PATH = "/api/backend";
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
