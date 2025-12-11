@@ -1,17 +1,33 @@
-import { API_BASE_URL } from "./config";
-import { GameState, MoveOption, Room, RoomStateResponse } from "./types";
+// frontend/lib/api.ts
 
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Request failed");
+import {
+  Room,
+  RoomStateResponse,
+  MoveOption,
+  GameState,
+} from "./types";
+import { API_BASE_PATH } from "./config";
+
+async function handleResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let message = `Request failed with status ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data && typeof (data as any).error === "string") {
+        message = (data as any).error;
+      }
+    } catch {}
+    throw new Error(message);
   }
-  return response.json() as Promise<T>;
+  return res.json() as Promise<T>;
 }
 
 export async function getRooms(): Promise<Room[]> {
-  const response = await fetch(`${API_BASE_URL}/rooms`, { method: "GET" });
-  const data = await handleResponse<{ rooms: Room[] }>(response);
+  const res = await fetch(`${API_BASE_PATH}/rooms`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const data = await handleResponse<{ rooms: Room[] }>(res);
   return data.rooms;
 }
 
@@ -21,35 +37,48 @@ export async function createRoom(payload: {
   maxPlayers: number;
   minPlayers: number;
 }): Promise<Room> {
-  const response = await fetch(`${API_BASE_URL}/rooms`, {
+  const res = await fetch(`${API_BASE_PATH}/rooms`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return handleResponse<Room>(response);
+
+  const data = await handleResponse<{ room: Room }>(res);
+  return data.room;
 }
 
 export async function getRoomState(id: string): Promise<RoomStateResponse> {
-  const response = await fetch(`${API_BASE_URL}/rooms/${id}/state`, { method: "GET" });
-  return handleResponse<RoomStateResponse>(response);
+  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/state`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  return handleResponse<RoomStateResponse>(res);
 }
 
 export async function joinRoom(id: string, playerId: string): Promise<Room> {
-  const response = await fetch(`${API_BASE_URL}/rooms/${id}/join`, {
+  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ playerId }),
   });
-  return handleResponse<Room>(response);
+
+  const data = await handleResponse<{ room: Room }>(res);
+  return data.room;
 }
 
-export async function commitMove(id: string, playerId: string, commitHash: string): Promise<GameState> {
-  const response = await fetch(`${API_BASE_URL}/rooms/${id}/commit`, {
+export async function commitMove(
+  id: string,
+  playerId: string,
+  commitHash: string
+): Promise<GameState> {
+  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/commit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ playerId, commitHash }),
   });
-  return handleResponse<GameState>(response);
+
+  const data = await handleResponse<{ game: GameState }>(res);
+  return data.game;
 }
 
 export async function revealMove(
@@ -58,10 +87,12 @@ export async function revealMove(
   move: MoveOption,
   salt: string
 ): Promise<GameState> {
-  const response = await fetch(`${API_BASE_URL}/rooms/${id}/reveal`, {
+  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/reveal`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ playerId, move, salt }),
   });
-  return handleResponse<GameState>(response);
+
+  const data = await handleResponse<{ game: GameState }>(res);
+  return data.game;
 }
