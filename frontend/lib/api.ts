@@ -6,7 +6,7 @@ import {
   MoveOption,
   GameState,
 } from "./types";
-import { API_BASE_PATH } from "./config";
+import { API_BASE_URL } from "./config";
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -16,17 +16,21 @@ async function handleResponse<T>(res: Response): Promise<T> {
       if (data && typeof (data as any).error === "string") {
         message = (data as any).error;
       }
-    } catch {}
+    } catch {
+      // ignore parse error
+    }
     throw new Error(message);
   }
+
   return res.json() as Promise<T>;
 }
 
 export async function getRooms(): Promise<Room[]> {
-  const res = await fetch(`${API_BASE_PATH}/rooms`, {
+  const res = await fetch(`${API_BASE_URL}/rooms`, {
     method: "GET",
     cache: "no-store",
   });
+
   const data = await handleResponse<{ rooms: Room[] }>(res);
   return data.rooms;
 }
@@ -37,7 +41,7 @@ export async function createRoom(payload: {
   maxPlayers: number;
   minPlayers: number;
 }): Promise<Room> {
-  const res = await fetch(`${API_BASE_PATH}/rooms`, {
+  const res = await fetch(`${API_BASE_URL}/rooms`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -48,15 +52,16 @@ export async function createRoom(payload: {
 }
 
 export async function getRoomState(id: string): Promise<RoomStateResponse> {
-  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/state`, {
+  const res = await fetch(`${API_BASE_URL}/rooms/${id}/state`, {
     method: "GET",
     cache: "no-store",
   });
+
   return handleResponse<RoomStateResponse>(res);
 }
 
 export async function joinRoom(id: string, playerId: string): Promise<Room> {
-  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/join`, {
+  const res = await fetch(`${API_BASE_URL}/rooms/${id}/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ playerId }),
@@ -71,7 +76,7 @@ export async function commitMove(
   playerId: string,
   commitHash: string
 ): Promise<GameState> {
-  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/commit`, {
+  const res = await fetch(`${API_BASE_URL}/rooms/${id}/commit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ playerId, commitHash }),
@@ -87,7 +92,7 @@ export async function revealMove(
   move: MoveOption,
   salt: string
 ): Promise<GameState> {
-  const res = await fetch(`${API_BASE_PATH}/rooms/${id}/reveal`, {
+  const res = await fetch(`${API_BASE_URL}/rooms/${id}/reveal`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ playerId, move, salt }),
