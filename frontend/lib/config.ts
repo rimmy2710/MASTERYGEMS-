@@ -1,6 +1,4 @@
-// frontend/lib/config.ts
-// Frontend calls backend directly via a public URL.
-// Backend has CORS enabled, so it can accept requests from the frontend origin.
+// Frontend should call the Next.js proxy routes, not the backend directly.
+// This avoids Codespaces "localhost" mismatch in the browser.
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+export const API_BASE_URL = "/api/backend";

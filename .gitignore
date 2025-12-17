@@ -1,0 +1,17 @@
+
+# dependencies
+node_modules/
+frontend/node_modules/
+
+# next build
+frontend/.next/
+
+# dependencies
+node_modules/
+frontend/node_modules/
+
+# next build
+frontend/.next/
+
+# local env
+frontend/.env.local

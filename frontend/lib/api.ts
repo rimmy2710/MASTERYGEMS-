@@ -1,103 +1,74 @@
-// frontend/lib/api.ts
-
-import {
-  Room,
-  RoomStateResponse,
-  MoveOption,
-  GameState,
-} from "./types";
 import { API_BASE_URL } from "./config";
 
-async function handleResponse<T>(res: Response): Promise<T> {
+export type Room = {
+  id: string;
+  type?: string;
+  stake?: number;
+  players?: number;
+  status?: string;
+};
+
+async function request(path: string, init?: RequestInit) {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    cache: "no-store",
+    ...init,
+    headers: {
+      accept: "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+
   if (!res.ok) {
-    let message = `Request failed with status ${res.status}`;
-    try {
-      const data = await res.json();
-      if (data && typeof (data as any).error === "string") {
-        message = (data as any).error;
-      }
-    } catch {
-      // ignore parse error
-    }
-    throw new Error(message);
+    const text = await res.text().catch(() => "");
+    throw new Error(`${init?.method ?? "GET"} ${API_BASE_URL}${path} -> ${res.status} ${text}`);
   }
 
-  return res.json() as Promise<T>;
+  return res;
 }
 
 export async function getRooms(): Promise<Room[]> {
-  const res = await fetch(`${API_BASE_URL}/rooms`, {
-    method: "GET",
-    cache: "no-store",
-  });
-
-  const data = await handleResponse<{ rooms: Room[] }>(res);
-  return data.rooms;
+  const res = await request(`/rooms`);
+  return (await res.json()) as Room[];
 }
 
-export async function createRoom(payload: {
-  type: "public" | "creator";
-  stake: 1 | 5 | 10;
-  maxPlayers: number;
-  minPlayers: number;
-}): Promise<Room> {
-  const res = await fetch(`${API_BASE_URL}/rooms`, {
+// ✅ POST tạo room: gửi JSON + content-type để tránh 400
+export async function createRoom(): Promise<any> {
+  const res = await request(`/rooms`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "test", stake: 1 }),
   });
-
-  const data = await handleResponse<{ room: Room }>(res);
-  return data.room;
+  return await res.json().catch(() => ({}));
 }
 
-export async function getRoomState(id: string): Promise<RoomStateResponse> {
-  const res = await fetch(`${API_BASE_URL}/rooms/${id}/state`, {
-    method: "GET",
-    cache: "no-store",
-  });
-
-  return handleResponse<RoomStateResponse>(res);
+export async function getRoomState(id: string): Promise<any> {
+  const res = await request(`/rooms/${id}/state`);
+  return await res.json();
 }
 
-export async function joinRoom(id: string, playerId: string): Promise<Room> {
-  const res = await fetch(`${API_BASE_URL}/rooms/${id}/join`, {
+export async function joinRoom(id: string): Promise<any> {
+  const res = await request(`/rooms/${id}/join`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ playerId }),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
   });
-
-  const data = await handleResponse<{ room: Room }>(res);
-  return data.room;
+  return await res.json().catch(() => ({}));
 }
 
-export async function commitMove(
-  id: string,
-  playerId: string,
-  commitHash: string
-): Promise<GameState> {
-  const res = await fetch(`${API_BASE_URL}/rooms/${id}/commit`, {
+export async function commitMove(id: string, payload: any): Promise<any> {
+  const res = await request(`/rooms/${id}/commit`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ playerId, commitHash }),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
   });
-
-  const data = await handleResponse<{ game: GameState }>(res);
-  return data.game;
+  return await res.json().catch(() => ({}));
 }
 
-export async function revealMove(
-  id: string,
-  playerId: string,
-  move: MoveOption,
-  salt: string
-): Promise<GameState> {
-  const res = await fetch(`${API_BASE_URL}/rooms/${id}/reveal`, {
+export async function revealMove(id: string, payload: any): Promise<any> {
+  const res = await request(`/rooms/${id}/reveal`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ playerId, move, salt }),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
   });
-
-  const data = await handleResponse<{ game: GameState }>(res);
-  return data.game;
+  return await res.json().catch(() => ({}));
 }
