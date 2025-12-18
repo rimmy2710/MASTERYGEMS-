@@ -1,7 +1,16 @@
-/** @type {import('next').NextConfig} */
+// frontend/next.config.mjs
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+/** @type {import('next').NextConfig} */
 const nextConfig = {
-  // No API rewrites; frontend talks directly to the backend URL.
+  turbopack: {
+    // Fix Codespaces / monorepo multiple lockfiles warning
+    root: __dirname,
+  },
 };
 
 export default nextConfig;
