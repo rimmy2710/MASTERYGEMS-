@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { copyToClipboard, getOrCreateIdentity, resetIdentity, setDisplayName } from "../../../lib/identity";
 
 type ApiOk<T> = { ok: true; data: T };
-type ApiErr = { ok: false; error: any };
 
 function isApiOk<T>(x: any): x is ApiOk<T> {
   return x && typeof x === "object" && x.ok === true && "data" in x;
@@ -29,7 +29,6 @@ async function apiGet<T>(path: string): Promise<T> {
     throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
 
-  // backend mostly returns {ok:true,data}, keep legacy compatibility anyway
   return isApiOk<T>(json) ? json.data : (json as T);
 }
 
@@ -60,12 +59,25 @@ type RoomDetail = {
     type: string;
     stake: number;
     status: string;
-    players: Array<{ id: string }>;
+    players: Array<{ id: string; joinedAt?: number }>;
     minPlayers?: number;
     maxPlayers?: number;
   };
-  game: any | null; // full game state per overview.ts
+  game: any | null;
 };
+
+function getPlayerIdsFromGame(game: any): string[] {
+  const arr = Array.isArray(game?.players) ? game.players : [];
+  return arr.map((p: any) => p?.id).filter(Boolean);
+}
+
+function getReadyIdsFromGame(game: any): string[] {
+  const arr = Array.isArray(game?.players) ? game.players : [];
+  return arr
+    .filter((p: any) => p && (p.ready === true || p.isReady === true || p.status === "ready"))
+    .map((p: any) => p.id)
+    .filter(Boolean);
+}
 
 export default function BattlePage() {
   const params = useParams<{ id: string }>();
@@ -74,25 +86,22 @@ export default function BattlePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [playerId, setPlayerId] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [playerId, setPlayerIdState] = useState("");
+  const [displayName, setDisplayNameState] = useState("");
 
   const [detail, setDetail] = useState<RoomDetail | null>(null);
 
-  // Light identity (not wallet): keep playerId in localStorage to avoid retyping
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("mg.playerId");
-      if (saved && !playerId) setPlayerId(saved);
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const id = getOrCreateIdentity();
+    setPlayerIdState(id.playerId);
+    setDisplayNameState(id.displayName || "");
   }, []);
 
-  useEffect(() => {
-    try {
-      if (playerId) window.localStorage.setItem("mg.playerId", playerId);
-    } catch {}
-  }, [playerId]);
+  const refreshIdentity = () => {
+    const id = getOrCreateIdentity();
+    setPlayerIdState(id.playerId);
+    setDisplayNameState(id.displayName || "");
+  };
 
   const refresh = async () => {
     if (!roomId) return;
@@ -177,7 +186,6 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      // playerId optional by backend schema; send if present for auth checks
       await apiPost<any>(`/api/backend/rooms/${roomId}/game/start`, playerId ? { playerId } : {});
       await refresh();
     } catch (e) {
@@ -201,15 +209,35 @@ export default function BattlePage() {
     }
   };
 
+  const onSaveName = () => {
+    setDisplayName(displayName);
+    refreshIdentity();
+  };
+
+  const onResetIdentity = () => {
+    resetIdentity();
+    refreshIdentity();
+  };
+
   const room = detail?.room;
   const game = detail?.game;
-  const players = room?.players?.map((p) => p.id) ?? [];
 
-  // Minimal phase-aware UX (best effort; depends on game schema)
   const phase = game?.phase ?? "none";
+  const roomPlayers = room?.players?.map((p) => p.id) ?? [];
+
+  const gamePlayerIds = getPlayerIdsFromGame(game);
+  const readyIds = getReadyIdsFromGame(game);
+
+  const minPlayers = room?.minPlayers ?? 2;
+
+  const isInRoom = !!playerId && roomPlayers.includes(playerId);
+  const isInGame = !!playerId && gamePlayerIds.includes(playerId);
+  const isReady = !!playerId && readyIds.includes(playerId);
+
   const canJoin = !!roomId && !!playerId;
-  const canReady = canJoin && phase === "lobby";
-  const canStart = phase === "lobby";
+  const canReady = phase === "lobby" && isInGame;
+  const canUnready = phase === "lobby" && isInGame && isReady;
+  const canStart = phase === "lobby" && gamePlayerIds.length >= minPlayers && readyIds.length >= minPlayers;
   const canFinish = phase === "running";
 
   return (
@@ -218,6 +246,7 @@ export default function BattlePage() {
         <h1 style={{ margin: 0 }}>Battle: {roomId || "(no roomId)"}</h1>
         {loading && <div>Loading...</div>}
         {error && <div style={{ color: "#b91c1c" }}>{error}</div>}
+
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <button onClick={refresh} disabled={loading || !roomId}>Refresh</button>
           <button onClick={ensureGame} disabled={loading || !roomId}>Create/Reuse Active Game</button>
@@ -225,69 +254,61 @@ export default function BattlePage() {
       </header>
 
       <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-        <h2 style={{ marginTop: 0 }}>Room</h2>
-        {room ? (
-          <ul style={{ paddingLeft: "1rem", lineHeight: 1.6 }}>
-            <li>ID: {room.id}</li>
-            <li>Type: {room.type}</li>
-            <li>Stake: {room.stake}</li>
-            <li>Status: {room.status}</li>
-            <li>Players: {players.length ? players.join(", ") : "None"}</li>
-            <li>Min/Max: {room.minPlayers ?? "-"} / {room.maxPlayers ?? "-"}</li>
-          </ul>
-        ) : (
-          <div>No room data.</div>
-        )}
+        <h2 style={{ marginTop: 0 }}>You (Identity v0)</h2>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          <span>ID:</span>
+          <code style={{ padding: "0.2rem 0.35rem", background: "#f3f4f6", borderRadius: 6 }}>{playerId || "…"}</code>
+          <button onClick={() => copyToClipboard(playerId)} disabled={!playerId || loading}>Copy ID</button>
+
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayNameState(e.target.value)}
+            placeholder="Display name (optional)"
+            style={{ padding: "0.35rem 0.5rem" }}
+          />
+          <button onClick={onSaveName} disabled={loading}>Save Name</button>
+          <button onClick={onResetIdentity} disabled={loading}>Reset Identity</button>
+        </div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+          Multi-player nhanh: mở Incognito / browser profile khác để có playerId khác.
+        </div>
       </div>
 
       <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-        <h2 style={{ marginTop: 0 }}>Game</h2>
-        <div style={{ marginBottom: "0.5rem" }}>Phase: <strong>{phase}</strong></div>
-        <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-          {game ? JSON.stringify(game, null, 2) : "No game picked yet. Join or Create/Reuse Active Game."}
-        </pre>
+        <h2 style={{ marginTop: 0 }}>Status</h2>
+        <ul style={{ paddingLeft: "1rem", lineHeight: 1.6, margin: 0 }}>
+          <li>Phase: <strong>{phase}</strong></li>
+          <li>Room players: <strong>{roomPlayers.length}</strong></li>
+          <li>Game players: <strong>{gamePlayerIds.length}</strong></li>
+          <li>Ready: <strong>{readyIds.length}</strong> (min to start: {minPlayers})</li>
+          <li>You: inRoom={String(isInRoom)} | inGame={String(isInGame)} | ready={String(isReady)}</li>
+        </ul>
       </div>
 
       <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
         <h2 style={{ marginTop: 0 }}>Actions</h2>
-
-        <div style={{ display: "grid", gap: "0.75rem", maxWidth: 560 }}>
-          <label style={{ display: "grid", gap: "0.25rem" }}>
-            Player ID (temporary)
-            <input
-              value={playerId}
-              onChange={(e) => setPlayerId(e.target.value)}
-              placeholder="p1"
-              style={{ padding: "0.5rem", border: "1px solid #d1d5db", borderRadius: 6 }}
-            />
-          </label>
-
-          <label style={{ display: "grid", gap: "0.25rem" }}>
-            Display Name (optional)
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Rimmy"
-              style={{ padding: "0.5rem", border: "1px solid #d1d5db", borderRadius: 6 }}
-            />
-          </label>
-
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button onClick={joinGame} disabled={loading || !canJoin}>Join Room+Game</button>
-            <button onClick={ready} disabled={loading || !canReady}>Ready</button>
-            <button onClick={unready} disabled={loading || !canReady}>Unready</button>
-            <button onClick={start} disabled={loading || !canStart}>Start</button>
-            <button onClick={finish} disabled={loading || !canFinish}>Finish</button>
-          </div>
-
-          <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.4 }}>
-            <ul style={{ paddingLeft: "1rem", margin: 0 }}>
-              <li>Battle đã migrate sang room-game lifecycle (join/ready/unready/start/finish).</li>
-              <li>Commit/Reveal UI tạm thời không nằm trong scope ngày 19/12.</li>
-              <li>Player ID chỉ là tạm thời (localStorage: <code>mg.playerId</code>), chưa phải wallet/session.</li>
-            </ul>
-          </div>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button onClick={joinGame} disabled={loading || !canJoin}>Join Room+Game</button>
+          <button onClick={ready} disabled={loading || !canReady}>Ready</button>
+          <button onClick={unready} disabled={loading || !canUnready}>Unready</button>
+          <button onClick={start} disabled={loading || !canStart}>Start</button>
+          <button onClick={finish} disabled={loading || !canFinish}>Finish</button>
         </div>
+
+        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.4, marginTop: 10 }}>
+          <ul style={{ paddingLeft: "1rem", margin: 0 }}>
+            <li>Start bật khi: phase=lobby, gamePlayers và ready ≥ minPlayers.</li>
+            <li>Ready/Unready bật khi bạn đã join game và phase=lobby.</li>
+            <li>Không log env/URL nội bộ ra UI.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h2 style={{ marginTop: 0 }}>Game (raw debug)</h2>
+        <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+          {game ? JSON.stringify(game, null, 2) : "No game picked yet. Join or Create/Reuse Active Game."}
+        </pre>
       </div>
     </section>
   );

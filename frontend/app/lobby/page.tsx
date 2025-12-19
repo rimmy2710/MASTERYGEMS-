@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../lib/config";
 import { v2CreateRoom } from "../../lib/apiV2";
+import { copyToClipboard, getOrCreateIdentity, resetIdentity, setDisplayName, setPlayerId } from "../../lib/identity";
 
 type Room = {
   id: string;
@@ -50,28 +51,11 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const msg =
-      json?.error?.message ||
-      json?.error ||
-      json?.message ||
-      `Request failed: ${res.status}`;
+    const msg = json?.error?.message || json?.error || json?.message || `Request failed: ${res.status}`;
     throw new Error(msg);
   }
 
   return json as T;
-}
-
-// Normalize player IDs to prevent case drift (P2 vs p2) and reduce injection surface.
-function normalizePlayerId(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, "");
-}
-
-function hasUnsafeChars(input: string): boolean {
-  // allow spaces for display name; ID should be strict
-  return /[^a-z0-9 _-]/i.test(input);
 }
 
 const th: React.CSSProperties = {
@@ -93,27 +77,26 @@ export default function LobbyPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // MVP identities (later replace with auth/wallet)
-  const [hostIdRaw, setHostIdRaw] = useState("p1");
-  const [hostName, setHostName] = useState("Host");
-  const [playerIdRaw, setPlayerIdRaw] = useState("p2");
-  const [playerName, setPlayerName] = useState("P2");
+  // Identity v0 (per browser)
+  const [playerId, setPlayerIdState] = useState("");
+  const [name, setNameState] = useState("");
 
-  const hostId = useMemo(() => normalizePlayerId(hostIdRaw), [hostIdRaw]);
-  const playerId = useMemo(() => normalizePlayerId(playerIdRaw), [playerIdRaw]);
+  // Optional manual override for testing in same browser (advanced)
+  const [overrideId, setOverrideId] = useState("");
 
   const canAct = useMemo(() => !loading, [loading]);
 
-  const idWarnings = useMemo(() => {
-    const warnings: string[] = [];
-    if (hostIdRaw !== hostId) warnings.push(`Host ID đã được normalize thành "${hostId}"`);
-    if (playerIdRaw !== playerId) warnings.push(`Player ID đã được normalize thành "${playerId}"`);
-    if (!hostId) warnings.push("Host ID đang trống sau khi normalize.");
-    if (!playerId) warnings.push("Player ID đang trống sau khi normalize.");
-    if (hasUnsafeChars(hostIdRaw)) warnings.push("Host ID có ký tự không hợp lệ (đã bị loại bỏ).");
-    if (hasUnsafeChars(playerIdRaw)) warnings.push("Player ID có ký tự không hợp lệ (đã bị loại bỏ).");
-    return warnings;
-  }, [hostIdRaw, hostId, playerIdRaw, playerId]);
+  useEffect(() => {
+    const id = getOrCreateIdentity();
+    setPlayerIdState(id.playerId);
+    setNameState(id.displayName || "Player");
+  }, []);
+
+  const refreshIdentity = () => {
+    const id = getOrCreateIdentity();
+    setPlayerIdState(id.playerId);
+    setNameState(id.displayName || "Player");
+  };
 
   const loadRooms = async () => {
     try {
@@ -130,12 +113,17 @@ export default function LobbyPage() {
     }
   };
 
+  useEffect(() => {
+    loadRooms();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const createRoomOnly = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // MIGRATED: use v2 envelope via frontend/lib/apiV2.ts
+      // v2 envelope
       await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
       await loadRooms();
@@ -151,18 +139,18 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
-      if (!hostId) {
-        setError("Host ID is required.");
+      if (!playerId) {
+        setError("Identity not ready. Refresh the page.");
         return;
       }
 
       // 1) create room (v2)
       const room = await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
-      // 2) create (or reuse) game for that room with host (room-game lifecycle; not yet versioned)
+      // 2) create (or reuse) game for that room with YOU as host
       await apiJson<{ ok: true; data: { gameId: string; reused: boolean } }>(`/rooms/${room.id}/game`, {
         method: "POST",
-        body: JSON.stringify({ hostPlayerId: hostId, hostDisplayName: hostName }),
+        body: JSON.stringify({ hostPlayerId: playerId, hostDisplayName: name || "Host" }),
       });
 
       await loadRooms();
@@ -179,13 +167,13 @@ export default function LobbyPage() {
       setError(null);
 
       if (!playerId) {
-        setError("Player ID is required.");
+        setError("Identity not ready. Refresh the page.");
         return;
       }
 
       await apiJson(`/rooms/${roomId}/game/join`, {
         method: "POST",
-        body: JSON.stringify({ playerId, displayName: playerName }),
+        body: JSON.stringify({ playerId, displayName: name || undefined }),
       });
 
       await loadRooms();
@@ -196,14 +184,19 @@ export default function LobbyPage() {
     }
   };
 
-  const ready = async (roomId: string, pid: string) => {
+  const ready = async (roomId: string) => {
     try {
       setLoading(true);
       setError(null);
 
+      if (!playerId) {
+        setError("Identity not ready. Refresh the page.");
+        return;
+      }
+
       await apiJson(`/rooms/${roomId}/game/ready`, {
         method: "POST",
-        body: JSON.stringify({ playerId: pid }),
+        body: JSON.stringify({ playerId }),
       });
 
       await loadRooms();
@@ -219,14 +212,14 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
-      if (!hostId) {
-        setError("Host ID is required.");
+      if (!playerId) {
+        setError("Identity not ready. Refresh the page.");
         return;
       }
 
       await apiJson(`/rooms/${roomId}/game/start`, {
         method: "POST",
-        body: JSON.stringify({ playerId: hostId }),
+        body: JSON.stringify({ playerId }),
       });
 
       await loadRooms();
@@ -242,14 +235,14 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
-      if (!hostId) {
-        setError("Host ID is required.");
+      if (!playerId) {
+        setError("Identity not ready. Refresh the page.");
         return;
       }
 
       await apiJson(`/rooms/${roomId}/game/finish`, {
         method: "POST",
-        body: JSON.stringify({ playerId: hostId }),
+        body: JSON.stringify({ playerId }),
       });
 
       await loadRooms();
@@ -260,10 +253,22 @@ export default function LobbyPage() {
     }
   };
 
-  useEffect(() => {
-    loadRooms();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const onSaveName = () => {
+    setDisplayName(name);
+    refreshIdentity();
+  };
+
+  const onResetIdentity = () => {
+    resetIdentity();
+    refreshIdentity();
+  };
+
+  const onApplyOverrideId = () => {
+    if (!overrideId.trim()) return;
+    setPlayerId(overrideId);
+    setOverrideId("");
+    refreshIdentity();
+  };
 
   return (
     <section style={{ padding: "1rem" }}>
@@ -278,44 +283,50 @@ export default function LobbyPage() {
           Create Room (v2)
         </button>
 
-        <button onClick={createRoomWithGame} disabled={!canAct}>
-          Create Room + Game (Host)
+        <button onClick={createRoomWithGame} disabled={!canAct || !playerId}>
+          Create Room + Game (You as Host)
         </button>
 
-        <span style={{ opacity: 0.7 }}>Host:</span>
-        <input
-          value={hostIdRaw}
-          onChange={(e) => setHostIdRaw(e.target.value)}
-          style={{ padding: "0.35rem 0.5rem" }}
-        />
-        <input value={hostName} onChange={(e) => setHostName(e.target.value)} style={{ padding: "0.35rem 0.5rem" }} />
+        <span style={{ opacity: 0.7 }}>You:</span>
+        <code style={{ padding: "0.2rem 0.35rem", background: "#f3f4f6", borderRadius: 6 }}>{playerId || "…"}</code>
+        <button onClick={() => copyToClipboard(playerId)} disabled={!playerId || !canAct}>
+          Copy ID
+        </button>
 
-        <span style={{ opacity: 0.7 }}>Player:</span>
         <input
-          value={playerIdRaw}
-          onChange={(e) => setPlayerIdRaw(e.target.value)}
+          value={name}
+          onChange={(e) => setNameState(e.target.value)}
+          placeholder="Display name"
           style={{ padding: "0.35rem 0.5rem" }}
         />
-        <input
-          value={playerName}
-          onChange={(e) => setPlayerName(e.target.value)}
-          style={{ padding: "0.35rem 0.5rem" }}
-        />
+        <button onClick={onSaveName} disabled={!canAct}>
+          Save Name
+        </button>
+
+        <button onClick={onResetIdentity} disabled={!canAct}>
+          Reset Identity
+        </button>
 
         <span style={{ marginLeft: "auto", opacity: 0.7 }}>
           Uses: <code>{API_BASE_URL}</code> → <code>/overview/rooms</code>
         </span>
       </div>
 
-      {idWarnings.length > 0 && (
-        <div style={{ marginBottom: "0.75rem", fontSize: 12, color: "#6b7280" }}>
-          <ul style={{ paddingLeft: "1.1rem", margin: 0 }}>
-            {idWarnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div style={{ marginBottom: "0.75rem", fontSize: 12, color: "#6b7280" }}>
+        Tip multi-player nhanh: mở **Incognito / browser profile khác** để có playerId khác. Hoặc dùng override bên dưới (nâng cao).
+      </div>
+
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+        <input
+          value={overrideId}
+          onChange={(e) => setOverrideId(e.target.value)}
+          placeholder="Override playerId (advanced)"
+          style={{ padding: "0.35rem 0.5rem" }}
+        />
+        <button onClick={onApplyOverrideId} disabled={!canAct || !overrideId.trim()}>
+          Apply Override
+        </button>
+      </div>
 
       {loading && <p>Loading...</p>}
       {error && <p style={{ color: "#b91c1c", marginTop: "0.5rem" }}>{error}</p>}
@@ -345,8 +356,6 @@ export default function LobbyPage() {
 
             {rooms.map((r) => {
               const phase = r.game?.phase ?? "none";
-              const playersCount = r.players?.length ?? 0;
-
               const canReady = phase === "lobby";
               const canStart = phase === "lobby";
               const canFinish = phase === "running";
@@ -357,7 +366,7 @@ export default function LobbyPage() {
                   <td style={td}>{r.type}</td>
                   <td style={td}>{r.stake}</td>
                   <td style={td}>
-                    {playersCount} / {r.maxPlayers}
+                    {(r.players?.length ?? 0)} / {r.maxPlayers}
                   </td>
                   <td style={td}>{r.status}</td>
                   <td style={td}>
@@ -372,31 +381,31 @@ export default function LobbyPage() {
                   <td style={td}>
                     <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                       <button onClick={() => joinRoomGame(r.id)} disabled={!canAct || !playerId}>
-                        Join (as {playerId || "?"})
+                        Join (You)
                       </button>
 
                       <button
-                        onClick={() => ready(r.id, playerId)}
+                        onClick={() => ready(r.id)}
                         disabled={!canAct || !playerId || !canReady}
                         title={!canReady ? `Ready disabled (phase=${phase})` : ""}
                       >
-                        Ready (as {playerId || "?"})
+                        Ready (You)
                       </button>
 
                       <button
                         onClick={() => start(r.id)}
-                        disabled={!canAct || !hostId || !canStart}
+                        disabled={!canAct || !playerId || !canStart}
                         title={!canStart ? `Start disabled (phase=${phase})` : ""}
                       >
-                        Start (as {hostId || "?"})
+                        Start (You)
                       </button>
 
                       <button
                         onClick={() => finish(r.id)}
-                        disabled={!canAct || !hostId || !canFinish}
+                        disabled={!canAct || !playerId || !canFinish}
                         title={!canFinish ? `Finish disabled (phase=${phase})` : ""}
                       >
-                        Finish (as {hostId || "?"})
+                        Finish (You)
                       </button>
 
                       <Link href={`/battle/${r.id}`}>Open</Link>
