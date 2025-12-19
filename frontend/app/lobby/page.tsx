@@ -5,7 +5,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../lib/config";
 import { v2CreateRoom } from "../../lib/apiV2";
-import { copyToClipboard, getOrCreateIdentity, resetIdentity, setDisplayName, setPlayerId } from "../../lib/identity";
+import {
+  loadIdentity,
+  saveIdentity,
+  normalizePlayerId,
+  normalizeDisplayName,
+  hasUnsafeIdChars,
+  MgIdentity,
+} from "../../lib/identity";
 
 type Room = {
   id: string;
@@ -51,7 +58,11 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const msg = json?.error?.message || json?.error || json?.message || `Request failed: ${res.status}`;
+    const msg =
+      json?.error?.message ||
+      json?.error ||
+      json?.message ||
+      `Request failed: ${res.status}`;
     throw new Error(msg);
   }
 
@@ -77,33 +88,48 @@ export default function LobbyPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Identity v0 (per browser)
-  const [playerId, setPlayerIdState] = useState("");
-  const [name, setNameState] = useState("");
+  // One shared identity source for FE (later replace with auth/wallet)
+  const [identity, setIdentity] = useState<MgIdentity>({
+    hostId: "p1",
+    hostName: "Host",
+    playerId: "p2",
+    playerName: "P2",
+  });
 
-  // Optional manual override for testing in same browser (advanced)
-  const [overrideId, setOverrideId] = useState("");
+  // Load once on mount
+  useEffect(() => {
+    const loaded = loadIdentity(identity);
+    setIdentity(loaded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist on changes
+  useEffect(() => {
+    saveIdentity(identity);
+  }, [identity]);
+
+  const hostId = useMemo(() => normalizePlayerId(identity.hostId), [identity.hostId]);
+  const playerId = useMemo(() => normalizePlayerId(identity.playerId), [identity.playerId]);
 
   const canAct = useMemo(() => !loading, [loading]);
 
-  useEffect(() => {
-    const id = getOrCreateIdentity();
-    setPlayerIdState(id.playerId);
-    setNameState(id.displayName || "Player");
-  }, []);
-
-  const refreshIdentity = () => {
-    const id = getOrCreateIdentity();
-    setPlayerIdState(id.playerId);
-    setNameState(id.displayName || "Player");
-  };
+  const idWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    if (identity.hostId !== hostId) warnings.push(`Host ID đã được normalize thành "${hostId}"`);
+    if (identity.playerId !== playerId) warnings.push(`Player ID đã được normalize thành "${playerId}"`);
+    if (!hostId) warnings.push("Host ID đang trống sau khi normalize.");
+    if (!playerId) warnings.push("Player ID đang trống sau khi normalize.");
+    if (hasUnsafeIdChars(identity.hostId)) warnings.push("Host ID có ký tự không hợp lệ (đã bị loại bỏ).");
+    if (hasUnsafeIdChars(identity.playerId)) warnings.push("Player ID có ký tự không hợp lệ (đã bị loại bỏ).");
+    return warnings;
+  }, [identity.hostId, identity.playerId, hostId, playerId]);
 
   const loadRooms = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Canonical lobby data remains overview (room + game summary)
+      // Canonical lobby data (v2)
       const res = await apiJson<{ ok: true; data: RoomOverview[] }>("/v2/overview/rooms");
       setRooms(res.data ?? []);
     } catch (err) {
@@ -113,17 +139,11 @@ export default function LobbyPage() {
     }
   };
 
-  useEffect(() => {
-    loadRooms();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const createRoomOnly = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // v2 envelope
       await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
       await loadRooms();
@@ -139,18 +159,18 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
-      if (!playerId) {
-        setError("Identity not ready. Refresh the page.");
+      if (!hostId) {
+        setError("Host ID is required.");
         return;
       }
 
       // 1) create room (v2)
       const room = await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
-      // 2) create (or reuse) game for that room with YOU as host
+      // 2) create (or reuse) game for that room with host (v2 room-game)
       await apiJson<{ ok: true; data: { gameId: string; reused: boolean } }>(`/v2/rooms/${room.id}/game`, {
         method: "POST",
-        body: JSON.stringify({ hostPlayerId: playerId, hostDisplayName: name || "Host" }),
+        body: JSON.stringify({ hostPlayerId: hostId, hostDisplayName: normalizeDisplayName(identity.hostName) }),
       });
 
       await loadRooms();
@@ -167,13 +187,13 @@ export default function LobbyPage() {
       setError(null);
 
       if (!playerId) {
-        setError("Identity not ready. Refresh the page.");
+        setError("Player ID is required.");
         return;
       }
 
       await apiJson(`/v2/rooms/${roomId}/game/join`, {
         method: "POST",
-        body: JSON.stringify({ playerId, displayName: name || undefined }),
+        body: JSON.stringify({ playerId, displayName: normalizeDisplayName(identity.playerName) }),
       });
 
       await loadRooms();
@@ -184,19 +204,14 @@ export default function LobbyPage() {
     }
   };
 
-  const ready = async (roomId: string) => {
+  const ready = async (roomId: string, pid: string) => {
     try {
       setLoading(true);
       setError(null);
 
-      if (!playerId) {
-        setError("Identity not ready. Refresh the page.");
-        return;
-      }
-
       await apiJson(`/v2/rooms/${roomId}/game/ready`, {
         method: "POST",
-        body: JSON.stringify({ playerId }),
+        body: JSON.stringify({ playerId: normalizePlayerId(pid) }),
       });
 
       await loadRooms();
@@ -212,14 +227,14 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
-      if (!playerId) {
-        setError("Identity not ready. Refresh the page.");
+      if (!hostId) {
+        setError("Host ID is required.");
         return;
       }
 
       await apiJson(`/v2/rooms/${roomId}/game/start`, {
         method: "POST",
-        body: JSON.stringify({ playerId }),
+        body: JSON.stringify({ playerId: hostId }),
       });
 
       await loadRooms();
@@ -235,14 +250,14 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
-      if (!playerId) {
-        setError("Identity not ready. Refresh the page.");
+      if (!hostId) {
+        setError("Host ID is required.");
         return;
       }
 
       await apiJson(`/v2/rooms/${roomId}/game/finish`, {
         method: "POST",
-        body: JSON.stringify({ playerId }),
+        body: JSON.stringify({ playerId: hostId }),
       });
 
       await loadRooms();
@@ -253,22 +268,10 @@ export default function LobbyPage() {
     }
   };
 
-  const onSaveName = () => {
-    setDisplayName(name);
-    refreshIdentity();
-  };
-
-  const onResetIdentity = () => {
-    resetIdentity();
-    refreshIdentity();
-  };
-
-  const onApplyOverrideId = () => {
-    if (!overrideId.trim()) return;
-    setPlayerId(overrideId);
-    setOverrideId("");
-    refreshIdentity();
-  };
+  useEffect(() => {
+    loadRooms();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <section style={{ padding: "1rem" }}>
@@ -283,50 +286,49 @@ export default function LobbyPage() {
           Create Room (v2)
         </button>
 
-        <button onClick={createRoomWithGame} disabled={!canAct || !playerId}>
-          Create Room + Game (You as Host)
+        <button onClick={createRoomWithGame} disabled={!canAct}>
+          Create Room + Game (Host) (v2)
         </button>
 
-        <span style={{ opacity: 0.7 }}>You:</span>
-        <code style={{ padding: "0.2rem 0.35rem", background: "#f3f4f6", borderRadius: 6 }}>{playerId || "…"}</code>
-        <button onClick={() => copyToClipboard(playerId)} disabled={!playerId || !canAct}>
-          Copy ID
-        </button>
-
+        <span style={{ opacity: 0.7 }}>Host:</span>
         <input
-          value={name}
-          onChange={(e) => setNameState(e.target.value)}
-          placeholder="Display name"
+          value={identity.hostId}
+          onChange={(e) => setIdentity((x) => ({ ...x, hostId: e.target.value }))}
           style={{ padding: "0.35rem 0.5rem" }}
         />
-        <button onClick={onSaveName} disabled={!canAct}>
-          Save Name
-        </button>
+        <input
+          value={identity.hostName}
+          onChange={(e) => setIdentity((x) => ({ ...x, hostName: e.target.value }))}
+          style={{ padding: "0.35rem 0.5rem" }}
+        />
 
-        <button onClick={onResetIdentity} disabled={!canAct}>
-          Reset Identity
-        </button>
+        <span style={{ opacity: 0.7 }}>Player:</span>
+        <input
+          value={identity.playerId}
+          onChange={(e) => setIdentity((x) => ({ ...x, playerId: e.target.value }))}
+          style={{ padding: "0.35rem 0.5rem" }}
+        />
+        <input
+          value={identity.playerName}
+          onChange={(e) => setIdentity((x) => ({ ...x, playerName: e.target.value }))}
+          style={{ padding: "0.35rem 0.5rem" }}
+        />
 
         <span style={{ marginLeft: "auto", opacity: 0.7 }}>
           Uses: <code>{API_BASE_URL}</code> → <code>/v2/overview/rooms</code>
         </span>
       </div>
 
-      <div style={{ marginBottom: "0.75rem", fontSize: 12, color: "#6b7280" }}>
-        Tip multi-player nhanh: mở **Incognito / browser profile khác** để có playerId khác. Hoặc dùng override bên dưới (nâng cao).
-      </div>
-
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-        <input
-          value={overrideId}
-          onChange={(e) => setOverrideId(e.target.value)}
-          placeholder="Override playerId (advanced)"
-          style={{ padding: "0.35rem 0.5rem" }}
-        />
-        <button onClick={onApplyOverrideId} disabled={!canAct || !overrideId.trim()}>
-          Apply Override
-        </button>
-      </div>
+      {idWarnings.length > 0 && (
+        <div style={{ background: "#fffbeb", border: "1px solid #f59e0b", padding: "0.75rem", borderRadius: 8, marginBottom: "0.75rem" }}>
+          <strong style={{ display: "block", marginBottom: 6 }}>Identity warnings</strong>
+          <ul style={{ paddingLeft: "1rem", margin: 0 }}>
+            {idWarnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {loading && <p>Loading...</p>}
       {error && <p style={{ color: "#b91c1c", marginTop: "0.5rem" }}>{error}</p>}
@@ -349,71 +351,70 @@ export default function LobbyPage() {
             {rooms.length === 0 && (
               <tr>
                 <td style={td} colSpan={7}>
-                  No rooms.
+                  No rooms yet.
                 </td>
               </tr>
             )}
 
-            {rooms.map((r) => {
-              const phase = r.game?.phase ?? "none";
-              const canReady = phase === "lobby";
-              const canStart = phase === "lobby";
-              const canFinish = phase === "running";
-
-              return (
-                <tr key={r.id}>
-                  <td style={td}>{r.id}</td>
-                  <td style={td}>{r.type}</td>
-                  <td style={td}>{r.stake}</td>
-                  <td style={td}>
-                    {(r.players?.length ?? 0)} / {r.maxPlayers}
-                  </td>
-                  <td style={td}>{r.status}</td>
-                  <td style={td}>
-                    {r.game ? (
-                      <span>
-                        {r.game.phase} ({r.game.playersCount})
-                      </span>
-                    ) : (
-                      <span>no game</span>
-                    )}
-                  </td>
-                  <td style={td}>
-                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                      <button onClick={() => joinRoomGame(r.id)} disabled={!canAct || !playerId}>
-                        Join (You)
-                      </button>
-
-                      <button
-                        onClick={() => ready(r.id)}
-                        disabled={!canAct || !playerId || !canReady}
-                        title={!canReady ? `Ready disabled (phase=${phase})` : ""}
-                      >
-                        Ready (You)
-                      </button>
-
-                      <button
-                        onClick={() => start(r.id)}
-                        disabled={!canAct || !playerId || !canStart}
-                        title={!canStart ? `Start disabled (phase=${phase})` : ""}
-                      >
-                        Start (You)
-                      </button>
-
-                      <button
-                        onClick={() => finish(r.id)}
-                        disabled={!canAct || !playerId || !canFinish}
-                        title={!canFinish ? `Finish disabled (phase=${phase})` : ""}
-                      >
-                        Finish (You)
-                      </button>
-
-                      <Link href={`/battle/${r.id}`}>Open</Link>
+            {rooms.map((room) => (
+              <tr key={room.id}>
+                <td style={td}>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <div>
+                      <strong>{room.id}</strong>
                     </div>
-                  </td>
-                </tr>
-              );
-            })}
+                    <div style={{ fontSize: 12, opacity: 0.8 }}>
+                      <Link href={`/battle/${room.id}`}>Open battle</Link>
+                    </div>
+                  </div>
+                </td>
+
+                <td style={td}>{room.type}</td>
+                <td style={td}>{room.stake}</td>
+
+                <td style={td}>
+                  {room.players?.length ? room.players.map((p) => p.id).join(", ") : "None"}
+                </td>
+
+                <td style={td}>{room.status}</td>
+
+                <td style={td}>
+                  {room.game ? (
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <div>id: {room.game.id}</div>
+                      <div>phase: {room.game.phase}</div>
+                      <div>players: {room.game.playersCount}</div>
+                    </div>
+                  ) : (
+                    "No game"
+                  )}
+                </td>
+
+                <td style={td}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button onClick={() => joinRoomGame(room.id)} disabled={!canAct || !playerId}>
+                      Join (Player)
+                    </button>
+
+                    <button onClick={() => ready(room.id, identity.hostId)} disabled={!canAct || !hostId}>
+                      Ready (Host)
+                    </button>
+
+                    <button onClick={() => ready(room.id, identity.playerId)} disabled={!canAct || !playerId}>
+                      Ready (Player)
+                    </button>
+
+                    <button onClick={() => start(room.id)} disabled={!canAct || !hostId}>
+                      Start (Host)
+                    </button>
+
+                    <button onClick={() => finish(room.id)} disabled={!canAct || !hostId}>
+                      Finish (Host)
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

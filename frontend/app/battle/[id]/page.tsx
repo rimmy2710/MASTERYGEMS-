@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { copyToClipboard, getOrCreateIdentity, resetIdentity, setDisplayName } from "../../../lib/identity";
+import {
+  loadIdentity,
+  saveIdentity,
+  normalizePlayerId,
+  normalizeDisplayName,
+  hasUnsafeIdChars,
+  MgIdentity,
+} from "../../../lib/identity";
 
 type ApiOk<T> = { ok: true; data: T };
 
@@ -86,22 +93,43 @@ export default function BattlePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [playerId, setPlayerIdState] = useState("");
-  const [displayName, setDisplayNameState] = useState("");
+  const [identity, setIdentity] = useState<MgIdentity>({
+    hostId: "p1",
+    hostName: "Host",
+    playerId: "p2",
+    playerName: "P2",
+  });
+
+  // which identity slot is "you" on this page
+  const [asRole, setAsRole] = useState<"host" | "player">("player");
+
+  const myIdRaw = asRole === "host" ? identity.hostId : identity.playerId;
+  const myNameRaw = asRole === "host" ? identity.hostName : identity.playerName;
+
+  const myId = useMemo(() => normalizePlayerId(myIdRaw), [myIdRaw]);
+  const myName = useMemo(() => normalizeDisplayName(myNameRaw), [myNameRaw]);
 
   const [detail, setDetail] = useState<RoomDetail | null>(null);
 
+  // Load identity once
   useEffect(() => {
-    const id = getOrCreateIdentity();
-    setPlayerIdState(id.playerId);
-    setDisplayNameState(id.displayName || "");
+    const loaded = loadIdentity(identity);
+    setIdentity(loaded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refreshIdentity = () => {
-    const id = getOrCreateIdentity();
-    setPlayerIdState(id.playerId);
-    setDisplayNameState(id.displayName || "");
-  };
+  // Persist identity
+  useEffect(() => {
+    saveIdentity(identity);
+  }, [identity]);
+
+  const idWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    if (myIdRaw !== myId) warnings.push(`Player ID đã được normalize thành "${myId}"`);
+    if (!myId) warnings.push("Player ID đang trống sau khi normalize.");
+    if (hasUnsafeIdChars(myIdRaw)) warnings.push("Player ID có ký tự không hợp lệ (đã bị loại bỏ).");
+    return warnings;
+  }, [myIdRaw, myId]);
 
   const refresh = async () => {
     if (!roomId) return;
@@ -137,13 +165,13 @@ export default function BattlePage() {
   };
 
   const joinGame = async () => {
-    if (!roomId || !playerId) return;
+    if (!roomId || !myId) return;
     setLoading(true);
     setError(null);
     try {
       await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/join`, {
-        playerId,
-        displayName: displayName || undefined,
+        playerId: myId,
+        displayName: myName || undefined,
       });
       await refresh();
     } catch (e) {
@@ -154,11 +182,11 @@ export default function BattlePage() {
   };
 
   const ready = async () => {
-    if (!roomId || !playerId) return;
+    if (!roomId || !myId) return;
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/ready`, { playerId });
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/ready`, { playerId: myId });
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to ready"));
@@ -168,11 +196,11 @@ export default function BattlePage() {
   };
 
   const unready = async () => {
-    if (!roomId || !playerId) return;
+    if (!roomId || !myId) return;
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/unready`, { playerId });
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/unready`, { playerId: myId });
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to unready"));
@@ -186,7 +214,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/start`, playerId ? { playerId } : {});
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/start`, myId ? { playerId: myId } : {});
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to start game"));
@@ -200,23 +228,13 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/finish`, playerId ? { playerId } : {});
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/finish`, myId ? { playerId: myId } : {});
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to finish game"));
     } finally {
       setLoading(false);
     }
-  };
-
-  const onSaveName = () => {
-    setDisplayName(displayName);
-    refreshIdentity();
-  };
-
-  const onResetIdentity = () => {
-    resetIdentity();
-    refreshIdentity();
   };
 
   const room = detail?.room;
@@ -230,11 +248,11 @@ export default function BattlePage() {
 
   const minPlayers = room?.minPlayers ?? 2;
 
-  const isInRoom = !!playerId && roomPlayers.includes(playerId);
-  const isInGame = !!playerId && gamePlayerIds.includes(playerId);
-  const isReady = !!playerId && readyIds.includes(playerId);
+  const isInRoom = !!myId && roomPlayers.includes(myId);
+  const isInGame = !!myId && gamePlayerIds.includes(myId);
+  const isReady = !!myId && readyIds.includes(myId);
 
-  const canJoin = !!roomId && !!playerId;
+  const canJoin = !!roomId && !!myId;
   const canReady = phase === "lobby" && isInGame;
   const canUnready = phase === "lobby" && isInGame && isReady;
   const canStart = phase === "lobby" && gamePlayerIds.length >= minPlayers && readyIds.length >= minPlayers;
@@ -246,33 +264,22 @@ export default function BattlePage() {
         <h1 style={{ margin: 0 }}>Battle: {roomId || "(no roomId)"}</h1>
         {loading && <div>Loading...</div>}
         {error && <div style={{ color: "#b91c1c" }}>{error}</div>}
-
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <button onClick={refresh} disabled={loading || !roomId}>Refresh</button>
           <button onClick={ensureGame} disabled={loading || !roomId}>Create/Reuse Active Game</button>
         </div>
       </header>
 
-      <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-        <h2 style={{ marginTop: 0 }}>You (Identity v0)</h2>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <span>ID:</span>
-          <code style={{ padding: "0.2rem 0.35rem", background: "#f3f4f6", borderRadius: 6 }}>{playerId || "…"}</code>
-          <button onClick={() => copyToClipboard(playerId)} disabled={!playerId || loading}>Copy ID</button>
-
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayNameState(e.target.value)}
-            placeholder="Display name (optional)"
-            style={{ padding: "0.35rem 0.5rem" }}
-          />
-          <button onClick={onSaveName} disabled={loading}>Save Name</button>
-          <button onClick={onResetIdentity} disabled={loading}>Reset Identity</button>
+      {idWarnings.length > 0 && (
+        <div style={{ background: "#fffbeb", border: "1px solid #f59e0b", padding: "0.75rem", borderRadius: 8 }}>
+          <strong style={{ display: "block", marginBottom: 6 }}>Identity warnings</strong>
+          <ul style={{ paddingLeft: "1rem", margin: 0 }}>
+            {idWarnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
         </div>
-        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-          Multi-player nhanh: mở Incognito / browser profile khác để có playerId khác.
-        </div>
-      </div>
+      )}
 
       <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
         <h2 style={{ marginTop: 0 }}>Status</h2>
@@ -281,27 +288,91 @@ export default function BattlePage() {
           <li>Room players: <strong>{roomPlayers.length}</strong></li>
           <li>Game players: <strong>{gamePlayerIds.length}</strong></li>
           <li>Ready: <strong>{readyIds.length}</strong> (min to start: {minPlayers})</li>
-          <li>You: inRoom={String(isInRoom)} | inGame={String(isInGame)} | ready={String(isReady)}</li>
+          <li>You: id=<strong>{myId || "(empty)"}</strong> | inRoom={String(isInRoom)} | inGame={String(isInGame)} | ready={String(isReady)}</li>
         </ul>
       </div>
 
       <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
         <h2 style={{ marginTop: 0 }}>Actions</h2>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button onClick={joinGame} disabled={loading || !canJoin}>Join Room+Game</button>
-          <button onClick={ready} disabled={loading || !canReady}>Ready</button>
-          <button onClick={unready} disabled={loading || !canUnready}>Unready</button>
-          <button onClick={start} disabled={loading || !canStart}>Start</button>
-          <button onClick={finish} disabled={loading || !canFinish}>Finish</button>
-        </div>
 
-        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.4, marginTop: 10 }}>
-          <ul style={{ paddingLeft: "1rem", margin: 0 }}>
-            <li>Start bật khi: phase=lobby, gamePlayers và ready ≥ minPlayers.</li>
-            <li>Ready/Unready bật khi bạn đã join game và phase=lobby.</li>
-            <li>Không log env/URL nội bộ ra UI.</li>
-          </ul>
+        <div style={{ display: "grid", gap: "0.75rem", maxWidth: 560 }}>
+          <label style={{ display: "grid", gap: "0.25rem" }}>
+            Act as
+            <select
+              value={asRole}
+              onChange={(e) => setAsRole(e.target.value as any)}
+              style={{ padding: "0.5rem", border: "1px solid #d1d5db", borderRadius: 6 }}
+            >
+              <option value="player">Player</option>
+              <option value="host">Host</option>
+            </select>
+          </label>
+
+          <label style={{ display: "grid", gap: "0.25rem" }}>
+            Player ID (shared)
+            <input
+              value={myIdRaw}
+              onChange={(e) => {
+                const v = e.target.value;
+                setIdentity((x) => (asRole === "host" ? { ...x, hostId: v } : { ...x, playerId: v }));
+              }}
+              placeholder="p2"
+              style={{ padding: "0.5rem", border: "1px solid #d1d5db", borderRadius: 6 }}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: "0.25rem" }}>
+            Display Name (optional, shared)
+            <input
+              value={myNameRaw}
+              onChange={(e) => {
+                const v = e.target.value;
+                setIdentity((x) => (asRole === "host" ? { ...x, hostName: v } : { ...x, playerName: v }));
+              }}
+              placeholder="Rimmy"
+              style={{ padding: "0.5rem", border: "1px solid #d1d5db", borderRadius: 6 }}
+            />
+          </label>
+
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button onClick={joinGame} disabled={loading || !canJoin}>Join Room+Game</button>
+            <button onClick={ready} disabled={loading || !canReady}>Ready</button>
+            <button onClick={unready} disabled={loading || !canUnready}>Unready</button>
+            <button onClick={start} disabled={loading || !canStart}>Start</button>
+            <button onClick={finish} disabled={loading || !canFinish}>Finish</button>
+          </div>
+
+          <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.4 }}>
+            <ul style={{ paddingLeft: "1rem", margin: 0 }}>
+              <li>Start bật khi: phase=lobby, gamePlayers và ready ≥ minPlayers.</li>
+              <li>Ready/Unready chỉ bật khi bạn đã join game và phase=lobby.</li>
+              <li>Không hiển thị env/URL nội bộ lên UI.</li>
+            </ul>
+          </div>
         </div>
+      </div>
+
+      <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h2 style={{ marginTop: 0 }}>Room</h2>
+        {room ? (
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <div>Type: {room.type} | Stake: {room.stake} | Status: {room.status}</div>
+            <div>
+              <strong>Players</strong>
+              <ul style={{ paddingLeft: "1rem", margin: "0.25rem 0 0" }}>
+                {roomPlayers.length === 0 && <li>None</li>}
+                {roomPlayers.map((pid) => (
+                  <li key={pid}>
+                    {pid}
+                    {gamePlayerIds.includes(pid) ? " (in game)" : " (room only)"}{readyIds.includes(pid) ? " ✅ready" : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div>No room data.</div>
+        )}
       </div>
 
       <div style={{ background: "#fff", padding: "1rem", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>

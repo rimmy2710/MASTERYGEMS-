@@ -1,95 +1,82 @@
-// frontend/lib/identity.ts
-// Frontend-only identity v0 (no wallet, no backend auth).
-// Stores a stable playerId + displayName per browser via localStorage.
-// Does NOT log internal URLs/secrets.
-
-export type Identity = {
+export type MgIdentity = {
+  hostId: string;
+  hostName: string;
   playerId: string;
-  displayName: string;
+  playerName: string;
 };
 
-const KEY_ID = "mg.playerId";
-const KEY_NAME = "mg.displayName";
+const STORAGE_KEY = "mg.identity.v1";
 
-function normalizePlayerId(input: string): string {
-  return input.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+/**
+ * Normalize player id to prevent case drift and reduce injection surface.
+ * Rules:
+ * - trim
+ * - lowercase
+ * - allow only [a-z0-9_-]
+ */
+export function normalizePlayerId(input: string): string {
+  return (input ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
 }
 
-function safeGet(key: string): string | null {
+/**
+ * Display names are allowed to contain spaces, but we still strip
+ * obviously risky characters.
+ */
+export function normalizeDisplayName(input: string): string {
+  const raw = (input ?? "").trim();
+  // Allow letters, numbers, space, underscore, dash, dot.
+  return raw.replace(/[^a-z0-9 _\-.]/gi, "");
+}
+
+export function hasUnsafeIdChars(input: string): boolean {
+  return /[^a-z0-9_-]/i.test((input ?? "").trim());
+}
+
+export function loadIdentity(fallback?: Partial<MgIdentity>): MgIdentity {
+  const fb: MgIdentity = {
+    hostId: fallback?.hostId ?? "p1",
+    hostName: fallback?.hostName ?? "Host",
+    playerId: fallback?.playerId ?? "p2",
+    playerName: fallback?.playerName ?? "P2",
+  };
+
+  if (typeof window === "undefined") return fb;
+
   try {
-    return window.localStorage.getItem(key);
+    const txt = window.localStorage.getItem(STORAGE_KEY);
+    if (!txt) return fb;
+
+    const parsed = JSON.parse(txt) as Partial<MgIdentity>;
+    const hostId = normalizePlayerId(parsed.hostId ?? fb.hostId);
+    const playerId = normalizePlayerId(parsed.playerId ?? fb.playerId);
+
+    return {
+      hostId: hostId || normalizePlayerId(fb.hostId),
+      hostName: normalizeDisplayName(parsed.hostName ?? fb.hostName) || fb.hostName,
+      playerId: playerId || normalizePlayerId(fb.playerId),
+      playerName: normalizeDisplayName(parsed.playerName ?? fb.playerName) || fb.playerName,
+    };
   } catch {
-    return null;
+    return fb;
   }
 }
 
-function safeSet(key: string, value: string) {
+export function saveIdentity(next: MgIdentity): void {
+  if (typeof window === "undefined") return;
+
+  const payload: MgIdentity = {
+    hostId: normalizePlayerId(next.hostId),
+    hostName: normalizeDisplayName(next.hostName),
+    playerId: normalizePlayerId(next.playerId),
+    playerName: normalizeDisplayName(next.playerName),
+  };
+
   try {
-    window.localStorage.setItem(key, value);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
-    // ignore
-  }
-}
-
-function safeRemove(key: string) {
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
-}
-
-function randomId(prefix = "p"): string {
-  // Prefer crypto for unpredictability; fallback to Math.random for older envs.
-  try {
-    const bytes = new Uint8Array(8);
-    window.crypto.getRandomValues(bytes);
-    const hex = Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-    return `${prefix}${hex}`;
-  } catch {
-    return `${prefix}${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-  }
-}
-
-export function getOrCreateIdentity(): Identity {
-  const existingRaw = safeGet(KEY_ID);
-  let playerId = existingRaw ? normalizePlayerId(existingRaw) : "";
-
-  if (!playerId) {
-    playerId = normalizePlayerId(randomId("p"));
-    safeSet(KEY_ID, playerId);
-  } else if (existingRaw !== playerId) {
-    // normalize persisted
-    safeSet(KEY_ID, playerId);
-  }
-
-  const displayName = safeGet(KEY_NAME) ?? "";
-  return { playerId, displayName };
-}
-
-export function setDisplayName(name: string) {
-  // Allow spaces; remove extreme length to reduce accidental logging / UI issues
-  const clean = (name ?? "").trim().slice(0, 40);
-  safeSet(KEY_NAME, clean);
-}
-
-export function resetIdentity() {
-  safeRemove(KEY_ID);
-  safeRemove(KEY_NAME);
-}
-
-export function setPlayerId(raw: string) {
-  const id = normalizePlayerId(raw);
-  if (!id) return;
-  safeSet(KEY_ID, id);
-}
-
-export function copyToClipboard(text: string) {
-  try {
-    void navigator.clipboard.writeText(text);
-  } catch {
-    // ignore
+    // ignore storage failures
   }
 }
