@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL } from "../../lib/config";
+import { v2CreateRoom } from "../../lib/apiV2";
 
 type Room = {
   id: string;
@@ -118,6 +119,8 @@ export default function LobbyPage() {
     try {
       setLoading(true);
       setError(null);
+
+      // Canonical lobby data remains overview (room + game summary)
       const res = await apiJson<{ ok: true; data: RoomOverview[] }>("/overview/rooms");
       setRooms(res.data ?? []);
     } catch (err) {
@@ -132,10 +135,8 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
-      await apiJson<Room>("/rooms", {
-        method: "POST",
-        body: JSON.stringify({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 }),
-      });
+      // MIGRATED: use v2 envelope via frontend/lib/apiV2.ts
+      await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
       await loadRooms();
     } catch (err) {
@@ -155,13 +156,10 @@ export default function LobbyPage() {
         return;
       }
 
-      // 1) create room
-      const room = await apiJson<Room>("/rooms", {
-        method: "POST",
-        body: JSON.stringify({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 }),
-      });
+      // 1) create room (v2)
+      const room = await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
-      // 2) create (or reuse) game for that room with host
+      // 2) create (or reuse) game for that room with host (room-game lifecycle; not yet versioned)
       await apiJson<{ ok: true; data: { gameId: string; reused: boolean } }>(`/rooms/${room.id}/game`, {
         method: "POST",
         body: JSON.stringify({ hostPlayerId: hostId, hostDisplayName: hostName }),
@@ -277,7 +275,7 @@ export default function LobbyPage() {
         </button>
 
         <button onClick={createRoomOnly} disabled={!canAct}>
-          Create Room
+          Create Room (v2)
         </button>
 
         <button onClick={createRoomWithGame} disabled={!canAct}>
