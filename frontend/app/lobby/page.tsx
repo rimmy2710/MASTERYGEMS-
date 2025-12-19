@@ -60,18 +60,59 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   return json as T;
 }
 
+// Normalize player IDs to prevent case drift (P2 vs p2) and reduce injection surface.
+function normalizePlayerId(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+}
+
+function hasUnsafeChars(input: string): boolean {
+  // allow spaces for display name; ID should be strict
+  return /[^a-z0-9 _-]/i.test(input);
+}
+
+const th: React.CSSProperties = {
+  textAlign: "left",
+  padding: "0.5rem",
+  borderBottom: "1px solid #e5e7eb",
+  backgroundColor: "#f9fafb",
+  fontWeight: 600,
+};
+
+const td: React.CSSProperties = {
+  padding: "0.5rem",
+  borderBottom: "1px solid #e5e7eb",
+  verticalAlign: "top",
+};
+
 export default function LobbyPage() {
   const [rooms, setRooms] = useState<RoomOverview[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // MVP identities (later replace with auth/wallet)
-  const [hostId, setHostId] = useState("p1");
+  const [hostIdRaw, setHostIdRaw] = useState("p1");
   const [hostName, setHostName] = useState("Host");
-  const [playerId, setPlayerId] = useState("p2");
+  const [playerIdRaw, setPlayerIdRaw] = useState("p2");
   const [playerName, setPlayerName] = useState("P2");
 
+  const hostId = useMemo(() => normalizePlayerId(hostIdRaw), [hostIdRaw]);
+  const playerId = useMemo(() => normalizePlayerId(playerIdRaw), [playerIdRaw]);
+
   const canAct = useMemo(() => !loading, [loading]);
+
+  const idWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    if (hostIdRaw !== hostId) warnings.push(`Host ID đã được normalize thành "${hostId}"`);
+    if (playerIdRaw !== playerId) warnings.push(`Player ID đã được normalize thành "${playerId}"`);
+    if (!hostId) warnings.push("Host ID đang trống sau khi normalize.");
+    if (!playerId) warnings.push("Player ID đang trống sau khi normalize.");
+    if (hasUnsafeChars(hostIdRaw)) warnings.push("Host ID có ký tự không hợp lệ (đã bị loại bỏ).");
+    if (hasUnsafeChars(playerIdRaw)) warnings.push("Player ID có ký tự không hợp lệ (đã bị loại bỏ).");
+    return warnings;
+  }, [hostIdRaw, hostId, playerIdRaw, playerId]);
 
   const loadRooms = async () => {
     try {
@@ -109,6 +150,11 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
+      if (!hostId) {
+        setError("Host ID is required.");
+        return;
+      }
+
       // 1) create room
       const room = await apiJson<Room>("/rooms", {
         method: "POST",
@@ -133,6 +179,11 @@ export default function LobbyPage() {
     try {
       setLoading(true);
       setError(null);
+
+      if (!playerId) {
+        setError("Player ID is required.");
+        return;
+      }
 
       await apiJson(`/rooms/${roomId}/game/join`, {
         method: "POST",
@@ -170,6 +221,11 @@ export default function LobbyPage() {
       setLoading(true);
       setError(null);
 
+      if (!hostId) {
+        setError("Host ID is required.");
+        return;
+      }
+
       await apiJson(`/rooms/${roomId}/game/start`, {
         method: "POST",
         body: JSON.stringify({ playerId: hostId }),
@@ -187,6 +243,11 @@ export default function LobbyPage() {
     try {
       setLoading(true);
       setError(null);
+
+      if (!hostId) {
+        setError("Host ID is required.");
+        return;
+      }
 
       await apiJson(`/rooms/${roomId}/game/finish`, {
         method: "POST",
@@ -224,11 +285,19 @@ export default function LobbyPage() {
         </button>
 
         <span style={{ opacity: 0.7 }}>Host:</span>
-        <input value={hostId} onChange={(e) => setHostId(e.target.value)} style={{ padding: "0.35rem 0.5rem" }} />
+        <input
+          value={hostIdRaw}
+          onChange={(e) => setHostIdRaw(e.target.value)}
+          style={{ padding: "0.35rem 0.5rem" }}
+        />
         <input value={hostName} onChange={(e) => setHostName(e.target.value)} style={{ padding: "0.35rem 0.5rem" }} />
 
         <span style={{ opacity: 0.7 }}>Player:</span>
-        <input value={playerId} onChange={(e) => setPlayerId(e.target.value)} style={{ padding: "0.35rem 0.5rem" }} />
+        <input
+          value={playerIdRaw}
+          onChange={(e) => setPlayerIdRaw(e.target.value)}
+          style={{ padding: "0.35rem 0.5rem" }}
+        />
         <input
           value={playerName}
           onChange={(e) => setPlayerName(e.target.value)}
@@ -239,6 +308,16 @@ export default function LobbyPage() {
           Uses: <code>{API_BASE_URL}</code> → <code>/overview/rooms</code>
         </span>
       </div>
+
+      {idWarnings.length > 0 && (
+        <div style={{ marginBottom: "0.75rem", fontSize: 12, color: "#6b7280" }}>
+          <ul style={{ paddingLeft: "1.1rem", margin: 0 }}>
+            {idWarnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {loading && <p>Loading...</p>}
       {error && <p style={{ color: "#b91c1c", marginTop: "0.5rem" }}>{error}</p>}
@@ -258,73 +337,79 @@ export default function LobbyPage() {
           </thead>
 
           <tbody>
-            {rooms.length === 0 && !loading ? (
+            {rooms.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: "0.75rem" }}>
-                  No rooms available.
+                <td style={td} colSpan={7}>
+                  No rooms.
                 </td>
               </tr>
-            ) : (
-              rooms.map((room) => (
-                <tr key={room.id}>
-                  <td style={td}>{room.id}</td>
-                  <td style={td}>{room.type}</td>
-                  <td style={td}>{room.stake}</td>
+            )}
+
+            {rooms.map((r) => {
+              const phase = r.game?.phase ?? "none";
+              const playersCount = r.players?.length ?? 0;
+
+              const canReady = phase === "lobby";
+              const canStart = phase === "lobby";
+              const canFinish = phase === "running";
+
+              return (
+                <tr key={r.id}>
+                  <td style={td}>{r.id}</td>
+                  <td style={td}>{r.type}</td>
+                  <td style={td}>{r.stake}</td>
                   <td style={td}>
-                    {room.players.length} / {room.maxPlayers}
+                    {playersCount} / {r.maxPlayers}
                   </td>
-                  <td style={td}>{room.status}</td>
+                  <td style={td}>{r.status}</td>
                   <td style={td}>
-                    {room.game ? (
+                    {r.game ? (
                       <span>
-                        {room.game.phase} ({room.game.playersCount})
+                        {r.game.phase} ({r.game.playersCount})
                       </span>
                     ) : (
-                      <span style={{ opacity: 0.6 }}>—</span>
+                      <span>no game</span>
                     )}
                   </td>
                   <td style={td}>
                     <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                      <button onClick={() => joinRoomGame(room.id)} disabled={!canAct}>
-                        Join (as {playerId})
+                      <button onClick={() => joinRoomGame(r.id)} disabled={!canAct || !playerId}>
+                        Join (as {playerId || "?"})
                       </button>
 
-                      <button onClick={() => ready(room.id, playerId)} disabled={!canAct}>
-                        Ready (as {playerId})
+                      <button
+                        onClick={() => ready(r.id, playerId)}
+                        disabled={!canAct || !playerId || !canReady}
+                        title={!canReady ? `Ready disabled (phase=${phase})` : ""}
+                      >
+                        Ready (as {playerId || "?"})
                       </button>
 
-                      <button onClick={() => start(room.id)} disabled={!canAct}>
-                        Start (as {hostId})
+                      <button
+                        onClick={() => start(r.id)}
+                        disabled={!canAct || !hostId || !canStart}
+                        title={!canStart ? `Start disabled (phase=${phase})` : ""}
+                      >
+                        Start (as {hostId || "?"})
                       </button>
 
-                      <button onClick={() => finish(room.id)} disabled={!canAct}>
-                        Finish (as {hostId})
+                      <button
+                        onClick={() => finish(r.id)}
+                        disabled={!canAct || !hostId || !canFinish}
+                        title={!canFinish ? `Finish disabled (phase=${phase})` : ""}
+                      >
+                        Finish (as {hostId || "?"})
                       </button>
 
-                      <Link href={`/battle/${room.id}`} style={{ color: "#2563eb", alignSelf: "center" }}>
-                        Open
-                      </Link>
+                      <Link href={`/battle/${r.id}`}>Open</Link>
                     </div>
                   </td>
                 </tr>
-              ))
-            )}
+              );
+            })}
           </tbody>
         </table>
       </div>
     </section>
   );
 }
-
-const th: React.CSSProperties = {
-  borderBottom: "1px solid #e5e7eb",
-  textAlign: "left",
-  padding: "0.5rem",
-  whiteSpace: "nowrap",
-};
-
-const td: React.CSSProperties = {
-  padding: "0.75rem",
-  borderBottom: "1px solid #e5e7eb",
-  verticalAlign: "top",
-};
