@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import roomsRoutes from "./routes/rooms";
 import roomsV2Routes from "./routes/roomsV2";
 import gameRoutes from "./routes/game";
+import gamesV2Routes from "./routes/gamesV2";
 import overviewRoutes from "./routes/overview";
 import roomGameRoutes from "./routes/roomGame";
 
@@ -29,11 +30,12 @@ server.register(swaggerUi, {
 
 // Legacy (keep behavior)
 server.register(roomsRoutes);
+server.register(gameRoutes);
 
 // V2 (additive, standardized response format)
 server.register(roomsV2Routes, { prefix: "/v2" });
+server.register(gamesV2Routes, { prefix: "/v2" });
 
-server.register(gameRoutes);
 server.register(overviewRoutes);
 server.register(roomGameRoutes);
 
