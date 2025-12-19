@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import WalletPanel from "../components/WalletPanel";
 import { API_BASE_URL } from "../../lib/config";
 import { v2CreateRoom } from "../../lib/apiV2";
 import {
@@ -108,19 +109,29 @@ export default function LobbyPage() {
     saveIdentity(identity);
   }, [identity]);
 
-  const hostId = useMemo(() => normalizePlayerId(identity.hostId), [identity.hostId]);
-  const playerId = useMemo(() => normalizePlayerId(identity.playerId), [identity.playerId]);
+  const hostId = useMemo(
+    () => normalizePlayerId(identity.hostId),
+    [identity.hostId]
+  );
+  const playerId = useMemo(
+    () => normalizePlayerId(identity.playerId),
+    [identity.playerId]
+  );
 
   const canAct = useMemo(() => !loading, [loading]);
 
   const idWarnings = useMemo(() => {
     const warnings: string[] = [];
-    if (identity.hostId !== hostId) warnings.push(`Host ID đã được normalize thành "${hostId}"`);
-    if (identity.playerId !== playerId) warnings.push(`Player ID đã được normalize thành "${playerId}"`);
+    if (identity.hostId !== hostId)
+      warnings.push(`Host ID đã được normalize thành "${hostId}"`);
+    if (identity.playerId !== playerId)
+      warnings.push(`Player ID đã được normalize thành "${playerId}"`);
     if (!hostId) warnings.push("Host ID đang trống sau khi normalize.");
     if (!playerId) warnings.push("Player ID đang trống sau khi normalize.");
-    if (hasUnsafeIdChars(identity.hostId)) warnings.push("Host ID có ký tự không hợp lệ (đã bị loại bỏ).");
-    if (hasUnsafeIdChars(identity.playerId)) warnings.push("Player ID có ký tự không hợp lệ (đã bị loại bỏ).");
+    if (hasUnsafeIdChars(identity.hostId))
+      warnings.push("Host ID có ký tự không hợp lệ (đã bị loại bỏ).");
+    if (hasUnsafeIdChars(identity.playerId))
+      warnings.push("Player ID có ký tự không hợp lệ (đã bị loại bỏ).");
     return warnings;
   }, [identity.hostId, identity.playerId, hostId, playerId]);
 
@@ -130,7 +141,9 @@ export default function LobbyPage() {
       setError(null);
 
       // Canonical lobby data (v2)
-      const res = await apiJson<{ ok: true; data: RoomOverview[] }>("/v2/overview/rooms");
+      const res = await apiJson<{ ok: true; data: RoomOverview[] }>(
+        "/v2/overview/rooms"
+      );
       setRooms(res.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load rooms");
@@ -168,10 +181,16 @@ export default function LobbyPage() {
       const room = await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
       // 2) create (or reuse) game for that room with host (v2 room-game)
-      await apiJson<{ ok: true; data: { gameId: string; reused: boolean } }>(`/v2/rooms/${room.id}/game`, {
-        method: "POST",
-        body: JSON.stringify({ hostPlayerId: hostId, hostDisplayName: normalizeDisplayName(identity.hostName) }),
-      });
+      await apiJson<{ ok: true; data: { gameId: string; reused: boolean } }>(
+        `/v2/rooms/${room.id}/game`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            hostPlayerId: hostId,
+            hostDisplayName: normalizeDisplayName(identity.hostName),
+          }),
+        }
+      );
 
       await loadRooms();
     } catch (err) {
@@ -193,7 +212,10 @@ export default function LobbyPage() {
 
       await apiJson(`/v2/rooms/${roomId}/game/join`, {
         method: "POST",
-        body: JSON.stringify({ playerId, displayName: normalizeDisplayName(identity.playerName) }),
+        body: JSON.stringify({
+          playerId,
+          displayName: normalizeDisplayName(identity.playerName),
+        }),
       });
 
       await loadRooms();
@@ -275,7 +297,17 @@ export default function LobbyPage() {
 
   return (
     <section style={{ padding: "1rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+      <WalletPanel />
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          marginBottom: "1rem",
+          flexWrap: "wrap",
+        }}
+      >
         <h1 style={{ margin: 0 }}>Lobby</h1>
 
         <button onClick={loadRooms} disabled={!canAct}>
@@ -320,7 +352,15 @@ export default function LobbyPage() {
       </div>
 
       {idWarnings.length > 0 && (
-        <div style={{ background: "#fffbeb", border: "1px solid #f59e0b", padding: "0.75rem", borderRadius: 8, marginBottom: "0.75rem" }}>
+        <div
+          style={{
+            background: "#fffbeb",
+            border: "1px solid #f59e0b",
+            padding: "0.75rem",
+            borderRadius: 8,
+            marginBottom: "0.75rem",
+          }}
+        >
           <strong style={{ display: "block", marginBottom: 6 }}>Identity warnings</strong>
           <ul style={{ paddingLeft: "1rem", margin: 0 }}>
             {idWarnings.map((w, i) => (

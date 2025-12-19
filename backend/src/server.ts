@@ -11,10 +11,14 @@ import gameRoutes from "./routes/game";
 import gamesV2Routes from "./routes/gamesV2";
 
 import overviewRoutes from "./routes/overview";
-import overviewV2Routes from "./routes/overviewV2";
-
 import roomGameRoutes from "./routes/roomGame";
+
+import overviewV2Routes from "./routes/overviewV2";
 import roomGameV2Routes from "./routes/roomGameV2";
+import sessionV2Routes from "./routes/sessionV2";
+
+// ✅ ADD: Wallet V2 routes
+import walletV2Routes from "./routes/walletV2";
 
 dotenv.config();
 
@@ -42,9 +46,13 @@ server.register(roomGameRoutes);
 server.register(roomsV2Routes, { prefix: "/v2" });
 server.register(gamesV2Routes, { prefix: "/v2" });
 
-// NOTE: overviewV2 and roomGameV2 already include "/v2/..." in their route paths
+// ✅ ADD: wallet V2 uses standard /v2 prefix
+server.register(walletV2Routes, { prefix: "/v2" });
+
+// V2 modules that already include /v2 in route paths
 server.register(overviewV2Routes);
 server.register(roomGameV2Routes);
+server.register(sessionV2Routes);
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const HOST = process.env.HOST || "0.0.0.0";
