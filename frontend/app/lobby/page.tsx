@@ -104,7 +104,7 @@ export default function LobbyPage() {
       setError(null);
 
       // Canonical lobby data remains overview (room + game summary)
-      const res = await apiJson<{ ok: true; data: RoomOverview[] }>("/overview/rooms");
+      const res = await apiJson<{ ok: true; data: RoomOverview[] }>("/v2/overview/rooms");
       setRooms(res.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load rooms");
@@ -148,7 +148,7 @@ export default function LobbyPage() {
       const room = await v2CreateRoom({ type: "public", stake: 1, maxPlayers: 10, minPlayers: 2 });
 
       // 2) create (or reuse) game for that room with YOU as host
-      await apiJson<{ ok: true; data: { gameId: string; reused: boolean } }>(`/rooms/${room.id}/game`, {
+      await apiJson<{ ok: true; data: { gameId: string; reused: boolean } }>(`/v2/rooms/${room.id}/game`, {
         method: "POST",
         body: JSON.stringify({ hostPlayerId: playerId, hostDisplayName: name || "Host" }),
       });
@@ -171,7 +171,7 @@ export default function LobbyPage() {
         return;
       }
 
-      await apiJson(`/rooms/${roomId}/game/join`, {
+      await apiJson(`/v2/rooms/${roomId}/game/join`, {
         method: "POST",
         body: JSON.stringify({ playerId, displayName: name || undefined }),
       });
@@ -194,7 +194,7 @@ export default function LobbyPage() {
         return;
       }
 
-      await apiJson(`/rooms/${roomId}/game/ready`, {
+      await apiJson(`/v2/rooms/${roomId}/game/ready`, {
         method: "POST",
         body: JSON.stringify({ playerId }),
       });
@@ -217,7 +217,7 @@ export default function LobbyPage() {
         return;
       }
 
-      await apiJson(`/rooms/${roomId}/game/start`, {
+      await apiJson(`/v2/rooms/${roomId}/game/start`, {
         method: "POST",
         body: JSON.stringify({ playerId }),
       });
@@ -240,7 +240,7 @@ export default function LobbyPage() {
         return;
       }
 
-      await apiJson(`/rooms/${roomId}/game/finish`, {
+      await apiJson(`/v2/rooms/${roomId}/game/finish`, {
         method: "POST",
         body: JSON.stringify({ playerId }),
       });
@@ -308,7 +308,7 @@ export default function LobbyPage() {
         </button>
 
         <span style={{ marginLeft: "auto", opacity: 0.7 }}>
-          Uses: <code>{API_BASE_URL}</code> → <code>/overview/rooms</code>
+          Uses: <code>{API_BASE_URL}</code> → <code>/v2/overview/rooms</code>
         </span>
       </div>
 

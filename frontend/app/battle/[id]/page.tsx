@@ -108,7 +108,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiGet<RoomDetail>(`/api/backend/overview/rooms/${roomId}`);
+      const data = await apiGet<RoomDetail>(`/api/backend/v2/overview/rooms/${roomId}`);
       setDetail(data);
     } catch (e) {
       setError(safeMsg(e, "Failed to load room detail"));
@@ -127,7 +127,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<{ gameId: string; reused: boolean }>(`/api/backend/rooms/${roomId}/game`, {});
+      await apiPost<{ gameId: string; reused: boolean }>(`/api/backend/v2/rooms/${roomId}/game`, {});
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to create/reuse active game"));
@@ -141,7 +141,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/rooms/${roomId}/game/join`, {
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/join`, {
         playerId,
         displayName: displayName || undefined,
       });
@@ -158,7 +158,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/rooms/${roomId}/game/ready`, { playerId });
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/ready`, { playerId });
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to ready"));
@@ -172,7 +172,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/rooms/${roomId}/game/unready`, { playerId });
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/unready`, { playerId });
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to unready"));
@@ -186,7 +186,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/rooms/${roomId}/game/start`, playerId ? { playerId } : {});
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/start`, playerId ? { playerId } : {});
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to start game"));
@@ -200,7 +200,7 @@ export default function BattlePage() {
     setLoading(true);
     setError(null);
     try {
-      await apiPost<any>(`/api/backend/rooms/${roomId}/game/finish`, playerId ? { playerId } : {});
+      await apiPost<any>(`/api/backend/v2/rooms/${roomId}/game/finish`, playerId ? { playerId } : {});
       await refresh();
     } catch (e) {
       setError(safeMsg(e, "Failed to finish game"));
